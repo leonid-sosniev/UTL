@@ -1,0 +1,79 @@
+# Auto detect text files and perform LF normalization
+*               text=auto
+*.doc           diff=astextplain
+*.DOC           diff=astextplain
+*.docx          diff=astextplain
+*.DOCX          diff=astextplain
+*.dot           diff=astextplain
+*.DOT           diff=astextplain
+*.pdf           diff=astextplain
+*.PDF           diff=astextplain
+*.rtf           diff=astextplain
+*.RTF           diff=astextplain
+*.md            text
+*.adoc          text
+*.textile       text
+*.mustache      text
+*.csv           text
+*.tab           text
+*.tsv           text
+*.sql           text
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.tif           binary
+*.tiff          binary
+*.ico           binary
+*.eps           binary
+*.svg           binary
+
+
+*.cs            diff=csharp
+
+
+*.db            binary
+*.p             binary
+*.pkl           binary
+*.pyc           binary
+*.pyd           binary
+*.pyo           binary
+*.pxd           text     filter=tab_to_spaces  eol=LF  diff=python
+*.py            text     filter=tab_to_spaces  eol=LF  diff=python
+*.py3           text     filter=tab_to_spaces  eol=LF  diff=python
+*.pyw           text     filter=tab_to_spaces  eol=LF  diff=python
+*.pyx           text     filter=tab_to_spaces  eol=LF  diff=python
+
+
+*.slo           binary
+*.lo            binary
+*.o             binary
+*.obj           binary
+*.gch           binary
+*.pch           binary
+*.so            binary
+*.dylib         binary
+*.dll           binary
+*.lai           binary
+*.la            binary
+*.a             binary
+*.lib           binary
+*.exe           binary
+*.out           binary
+*.app           binary
+
+*.c             text     filter=tab_to_spaces  eol=LF  diff=cpp
+*.cc            text     filter=tab_to_spaces  eol=LF  diff=cpp
+*.cxx           text     filter=tab_to_spaces  eol=LF  diff=cpp
+*.cpp           text     filter=tab_to_spaces  eol=LF  diff=cpp
+*.c++           text     filter=tab_to_spaces  eol=LF  diff=cpp
+*.hpp           text     filter=tab_to_spaces  eol=LF  diff=cpp
+*.h             text     filter=tab_to_spaces  eol=LF  diff=cpp
+*.h++           text     filter=tab_to_spaces  eol=LF  diff=cpp
+*.hh            text     filter=tab_to_spaces  eol=LF  diff=cpp
+
+
+*.rc                     text filter=utf16le_vs_utf8  eol=CRLF  diff
+*LybidLoader/resource.h  text filter=utf16le_vs_utf8  eol=CRLF  diff
+
+*.sln           apply.whitespace=nowarn

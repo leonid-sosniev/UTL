@@ -1,0 +1,58 @@
+[core]
+    fileMode = false
+    filemode = false
+    eol = input
+    autocrlf = input
+    safecrlf = false
+    ignorecase = false
+    logallrefupdates = true
+    whitespace = cr-at-eol,blank-at-eol,blank-at-eof,space-before-tab,tab-in-indent
+    editor = 'C:/Program Files/Notepad++/notepad++.exe' -multiInst -notabbar -nosession -noPlugin "$*"
+
+[apply]
+    whitespace = fix #error-all
+
+[merge]
+    renamelimit = 400
+    tool = meld
+
+[diff]
+    context = 4
+    interhunkcontext = 0
+    renameLimit = 400
+    renames = copies
+    wordRegex = ([a-zA-Z_0-9]+)|([à-ÿÀ-ß]+)|([:punct:]+)|.
+    indentHeuristic = true
+    algorithm = patience
+
+[grep]
+    patternType = perl
+    
+[filter "utf16le_vs_utf8"]
+    clean = iconv -f UTF-16LE -t UTF-8
+    smudge = iconv -t UTF-16LE -f UTF-8
+    
+[filter "tab_to_spaces"]
+    clean = expand --initial -t 4
+    smudge = expand --initial -t 4
+    
+[filter "crlf_vs_lf"]
+    clean = dos2unix --force -ascii
+    smudge = unix2dos --force -ascii
+
+[alias]
+    history      = log --oneline --decorate --graph
+    find-diff-re = log --oneline -G
+    find-diff    = log --oneline -S
+    stat         = status --short
+    diff-c       = diff --color
+    diff-w       = diff --minimal --color-words=([a-zA-Z_0-9]+)|([à-ÿÀ-ß]+)|([:punct:]+)|.
+    show-w       = show --minimal --color-words=([a-zA-Z_0-9]+)|([à-ÿÀ-ß]+)|([:punct:]+)|.
+
+[remote "origin"]
+    url = https://barakababra@bitbucket.org/barakababra/utl.git
+    fetch = +refs/heads/*:refs/remotes/origin/*
+    
+[branch "master"]
+    remote = origin
+    merge = refs/heads/master
