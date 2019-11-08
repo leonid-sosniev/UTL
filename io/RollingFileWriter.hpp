@@ -15,7 +15,7 @@ namespace _utl
         uint64_t m_maxSeconds;
         time_t m_rollTimepoint;
         std::vector<char> m_buffer;
-        void (RollingFileWriter::*write_function)(const void*, uint32_t) = &RollingFileWriter::write_firstOpen;
+        uint32_t (RollingFileWriter::*write_function)(const void*, uint32_t) = &RollingFileWriter::write_firstOpen;
     private:
         __forceinline const std::string & newFilePath()
         {
@@ -75,7 +75,7 @@ namespace _utl
             std::setvbuf(m_sink, m_buffer.data(), _IOFBF, m_buffer.size());
         }
     private:
-        void write_firstOpen(const void * data, uint32_t size)
+        uint32_t write_firstOpen(const void * data, uint32_t size)
         {
             time_t tp = calcRollTimepoint(m_maxSeconds);
             openStream(tp);
@@ -88,27 +88,27 @@ namespace _utl
                 ? &RollingFileWriter::write_rolling
                 : &RollingFileWriter::write_simple;
 
-            (this->*write_function)(data, size);
+            return (this->*write_function)(data, size);
         }
-        void write_rolling(const void * data, uint32_t size)
+        uint32_t write_rolling(const void * data, uint32_t size)
         {
             if (time(nullptr) > m_rollTimepoint || static_cast<uint64_t>(ftell(m_sink)) + size > m_maxSize) {
                 std::fclose(m_sink);
                 time_t tp = calcRollTimepoint(m_maxSeconds);
                 openStream(tp);
             }
-            write_simple(data, size);
+            return write_simple(data, size);
         }
-        void write_simple(const void * data, uint32_t size)
+        uint32_t write_simple(const void * data, uint32_t size)
         {
             auto chars = static_cast<const char*>(data);
 
             #if defined(_MSC_VER) && !defined(__INTEL_COMPILER)
-                _fwrite_nolock(chars, 1, size, m_sink);
+                return _fwrite_nolock(chars, 1, size, m_sink);
             #elif defined(__linux__)
-                fwrite_unlocked(chars, 1, size, m_sink);
+                return fwrite_unlocked(chars, 1, size, m_sink);
             #else
-                fwrite(chars, 1, size, m_sink);
+                return fwrite(chars, 1, size, m_sink);
             #endif
         }
     public:
@@ -124,7 +124,7 @@ namespace _utl
         ~RollingFileWriter() override;
 
         void flush() override { fflush(m_sink); }
-        void write(const void * data, uint32_t size) override { (this->*write_function)(data, size); }
+        uint32_t write(const void * data, uint32_t size) override { return (this->*write_function)(data, size); }
     };
 
     RollingFileWriter::~RollingFileWriter() { fclose(m_sink); }
