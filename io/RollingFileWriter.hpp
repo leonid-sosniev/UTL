@@ -15,8 +15,9 @@ namespace _utl
         uint64_t m_maxSeconds;
         time_t m_rollTimepoint;
         std::vector<char> m_buffer;
+        void (RollingFileWriter::*write_function)(const void*, uint32_t) = &RollingFileWriter::write_firstOpen;
     private:
-        const std::string & newFilePath()
+        __forceinline const std::string & newFilePath()
         {
             static std::string path;
 
@@ -34,11 +35,20 @@ namespace _utl
 
             return path;
         }
-        static std::string formatAsDirpath(const std::string & path)
+        __forceinline std::string formatFilePathPrefix(const std::string & path, const std::string & prefix)
         {
-            return (path.back() == '\\' || path.back() == '/') ? path : path + "/";
+            std::string result;
+            result.reserve(path.size() + 1 + prefix.size() + 1);
+
+            bool hasDelimiter = path.size() && ( path.back() == '\\' || path.back() == '/' );
+
+            result.append(path.size() ? path : ".");
+            result.append(hasDelimiter ? "" : "/");
+            result.append(prefix);
+
+            return result;
         }
-        static time_t calcRollTimepoint(int64_t maxSeconds)
+        time_t calcRollTimepoint(int64_t maxSeconds)
         {
             #if defined(max)
              #undef max
@@ -64,32 +74,33 @@ namespace _utl
             }
             std::setvbuf(m_sink, m_buffer.data(), _IOFBF, m_buffer.size());
         }
-    public:
-        RollingFileWriter(const std::string & dirPath = "logs/", const std::string & namePrefix = "", uint64_t maxSize = -1, uint64_t maxSeconds = -1, uint32_t bufferSize = 256*1024)
-            : m_sink()
-            , m_filePathPrefix(formatAsDirpath(dirPath) + namePrefix)
-            , m_maxSize(maxSize)
-            , m_maxSeconds(maxSeconds)
+    private:
+        void write_firstOpen(const void * data, uint32_t size)
         {
-            m_buffer.resize(bufferSize);
-        }
+            time_t tp = calcRollTimepoint(m_maxSeconds);
+            openStream(tp);
 
-        ~RollingFileWriter() override;
+            bool rollingEnabled =
+                (m_maxSeconds != uint64_t(-1)) ||
+                (m_maxSize != uint64_t(-1));
 
-        void flush() override {
-            fflush(m_sink);
+            write_function = (rollingEnabled)
+                ? &RollingFileWriter::write_rolling
+                : &RollingFileWriter::write_simple;
+
+            (this->*write_function)(data, size);
         }
-        void write(const void * data, uint32_t size) override
+        void write_rolling(const void * data, uint32_t size)
         {
-            if (!m_sink) {
-                time_t tp = calcRollTimepoint(m_maxSeconds);
-                openStream(tp);
-            }
-            else if (time(nullptr) > m_rollTimepoint || static_cast<uint64_t>(ftell(m_sink)) + size > m_maxSize) {
+            if (time(nullptr) > m_rollTimepoint || static_cast<uint64_t>(ftell(m_sink)) + size > m_maxSize) {
                 std::fclose(m_sink);
                 time_t tp = calcRollTimepoint(m_maxSeconds);
                 openStream(tp);
             }
+            write_simple(data, size);
+        }
+        void write_simple(const void * data, uint32_t size)
+        {
             auto chars = static_cast<const char*>(data);
 
             #if defined(_MSC_VER) && !defined(__INTEL_COMPILER)
@@ -100,6 +111,20 @@ namespace _utl
                 fwrite(chars, 1, size, m_sink);
             #endif
         }
+    public:
+        RollingFileWriter(const std::string & dirPath = "logs/", const std::string & namePrefix = "", uint64_t maxSize = -1, uint64_t maxSeconds = -1, uint32_t bufferSize = 256*1024)
+            : m_sink()
+            , m_filePathPrefix(formatFilePathPrefix(dirPath, namePrefix))
+            , m_maxSize(maxSize)
+            , m_maxSeconds(maxSeconds)
+        {
+            m_buffer.resize(bufferSize);
+        }
+
+        ~RollingFileWriter() override;
+
+        void flush() override { fflush(m_sink); }
+        void write(const void * data, uint32_t size) override { (this->*write_function)(data, size); }
     };
 
     RollingFileWriter::~RollingFileWriter() { fclose(m_sink); }
