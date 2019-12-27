@@ -24,90 +24,116 @@ namespace _utl
                     Buffer(size_t size) : data(new char[size]), end(data + size), cursor(data) {}
                 };
             private:
-                void writeToFile(const void * data, size_t size)
+                Buffer *A, *B;
+                FILE * F;
+                std::thread W;
+                _utl::SpinLock fileSync;
+                std::atomic_bool writtingBufferB, workerActive;
+            private:
+                inline bool BUF_isEmpty(const Buffer * buf) { return buf->cursor == buf->data; }
+                inline bool BUF_isFull(const Buffer * buf) { return  buf->cursor == buf->end; }
+                inline uint32_t BUF_capacity(const Buffer * buf) { return buf->end - buf->cursor; }
+                inline uint32_t BUF_dataSize(const Buffer * buf) const { return buf->cursor - buf->data; }
+                inline uint32_t BUF_freeSize(const Buffer * buf) const { return buf->end - buf->cursor; }
+                inline uint32_t BUF_appendPart(Buffer * buf, const void * data, uint32_t size)
                 {
-                    LOCK(F_sync);
+                    uint32_t appendable = (BUF_freeSize(buf) < size) ? BUF_freeSize(buf) : size;
+                    std::memcpy(buf->cursor, data, appendable);
+                    buf->cursor += appendable;
+                    return appendable;
+                }
+                inline void BUF_writeToFile(Buffer * buf)
+                {
+                    LOCK(fileSync);
 
-                   #if defined(_MSC_VER) && !defined(__INTEL_COMPILER)
-                    _fwrite_nolock(data, 1, size, F);
-                   #elif defined(__linux__)
+                    #if defined(_MSC_VER) && !defined(__INTEL_COMPILER)
+                    _fwrite_nolock(buf->data, 1, BUF_dataSize(buf), F);
+                    #elif defined(__linux__)
                     fwrite_unlocked(data, 1, size, F);
-                   #else
+                    #else
                     fwrite(data, 1, size, F);
-                   #endif
+                    #endif
+
+                    buf->cursor = buf->data;
                 }
                 void worker()
                 {
-                    while (A && B)
+                    while (workerActive)
                     {
-                        if (hasReadyBuffer)
+                        if (writtingBufferB)
                         {
-                            writeToFile(B->data, B->cursor - B->data);
-                            B->cursor = B->data;
-                            hasReadyBuffer = false;
+                            if (!F) {
+                                std::abort();
+                            }
+                            BUF_writeToFile(B);
+                            writtingBufferB = false;
                         }
                         else {
                             std::this_thread::sleep_for(std::chrono::microseconds{ 500 });
                         }
                     }
                 }
+            private:
                 void flush(bool close)
                 {
-                    while (hasReadyBuffer) { std::this_thread::yield(); }
-                    if (B->cursor > B->data) {
+                    if (!F) { return; }
+
+                    while (writtingBufferB) { std::this_thread::yield(); }
+                    if (BUF_isEmpty(B) == false) {
                         throw std::logic_error("flush: buffer B is supposed to be clear (but it isnt).");
                     }
-                    // B is either already empty or was cleared after writing
+                    std::swap(A, B);      // doesnt matter if A is full
+                    writtingBufferB = true; // run file writing
 
-                    std::swap(A, B);       // doesnt matter if A is full
-                    hasReadyBuffer = true; // run file writing
-
-                    while (hasReadyBuffer) { std::this_thread::yield(); }
-                    if (B->cursor > B->data) {
+                    while (writtingBufferB) { std::this_thread::yield(); }
+                    if (BUF_isEmpty(B) == false) {
                         throw std::logic_error("flush: buffer B is supposed to be clear (but it isnt).");
                     }
-                    // A is either already empty or was cleared after writing
-
-                    if (close) {
-                        fclose(F);
-                        F = nullptr;
-
-                        delete A;
-                        delete B;
-                        A = B = nullptr;
-
+                    if (close)
+                    {
+                        fileSync.lock();
+                        workerActive = false;
+                        fclose(F); F = nullptr;
+                        delete A;  A = nullptr;
+                        delete B;  B = nullptr;
+                        fileSync.unlock();
                         if (W.joinable()) { W.join(); }
                     }
                 }
-            private:
-                Buffer *A, *B;
-                FILE * F;
-                std::thread W;
-                _utl::SpinLock F_sync;
-                std::atomic_bool hasReadyBuffer;
             public:
                 void changeFile(FILE * file)
                 {
-                    LOCK(F_sync);
+                    LOCK(fileSync);
                     if (F) { fclose(F); }
-                    F = file;
-                    if (file) { std::setvbuf(F, nullptr, _IONBF, 0); }
+                    if (F = file) {
+                        std::setvbuf(F, nullptr, _IONBF, 0);
+                    }
+                    else {
+                        throw std::runtime_error("changeFile: failed to open file.");
+                    }
                 }
                 void write(const void * data, size_t size)
                 {
-                    if (A->cursor + size > A->end)
+                    register const char * p = static_cast<const char *>(data);
+                    register const char * end = p + size;
+
+                    for (;;)
                     {
-                        while (hasReadyBuffer) { std::this_thread::sleep_for(std::chrono::microseconds{ 500 }); }
-                        std::swap(A, B);
-                        hasReadyBuffer = true;
+                        p += BUF_appendPart(A, p, end-p);
+                        if (end > p) {
+                            while (writtingBufferB) { std::this_thread::sleep_for(std::chrono::microseconds{ 500 }); }
+                            std::swap(A, B);
+                            writtingBufferB = true;
+                        }
+                        else {
+                            writtingBufferB = true;
+                            return;
+                        }
                     }
-                    auto p = static_cast<const char*>(data);
-                    auto end = p + size;
-                    while (p < end) { *A->cursor++ = *p++; }
                 }
                 long tell()
                 {
-                    LOCK(F_sync);
+                    LOCK(fileSync);
                     return ftell(F);
                 }
                 void flush() { flush(false); }
@@ -117,7 +143,8 @@ namespace _utl
                     : A(new Buffer{ bufferSize / 2 })
                     , B(new Buffer{ (bufferSize + 1) / 2 })
                     , F(file)
-                    , hasReadyBuffer(false)
+                    , writtingBufferB(false)
+                    , workerActive(true)
                 {
                     if (file) { std::setvbuf(F, nullptr, _IONBF, 0); }
                     W = std::thread{ &BackgroundWriter::worker, this };
@@ -239,5 +266,5 @@ namespace _utl
 
     #undef detail
 
-    RollingFileWriter::~RollingFileWriter() { m_sink.flush(); }
+    RollingFileWriter::~RollingFileWriter() { m_sink.close(); }
 }
