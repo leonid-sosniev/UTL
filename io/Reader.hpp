@@ -22,4 +22,13 @@ namespace _utl
         }
     };
 
+    class NullReader : public AbstractReader {
+    public:
+        virtual uint32_t read(void * data, uint32_t maxSize) override
+        {
+            (void) data; (void) maxSize;
+            std::abort(); return 0;
+        }
+    };
+
 }

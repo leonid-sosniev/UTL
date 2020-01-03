@@ -17,4 +17,10 @@ namespace _utl
         virtual void flush() override {}
     };
 
+    class NullWriter : public AbstractWriter {
+    public:
+        void write(const void * data, uint32_t size) override { std::abort(); (void) data; (void) size; }
+        void flush() override { std::abort(); }
+    };
+
 }
