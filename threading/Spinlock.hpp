@@ -14,8 +14,8 @@ namespace _utl
         bool try_lock_for(std::chrono::milliseconds);
         void unlock();
     private:
-        std::atomic_flag lck = ATOMIC_FLAG_INIT;
-        uint8_t m_useSleeping;
+        volatile std::atomic_flag lck = ATOMIC_FLAG_INIT;
+        const bool useSleeping;
     };
 
 }

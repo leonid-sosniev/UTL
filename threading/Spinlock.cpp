@@ -1,24 +1,21 @@
 #include <utl/threading/Spinlock.hpp>
 #include <thread>
 
-_utl::SpinLock::SpinLock(bool useSleeping)
-    : m_useSleeping(useSleeping)
+using namespace std::chrono;
+
+_utl::SpinLock::SpinLock(bool useSleeping) : useSleeping(useSleeping)
 {}
 
 void _utl::SpinLock::lock()
 {
     while (lck.test_and_set(std::memory_order_acquire))
     {
-        if (m_useSleeping) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
+        if (useSleeping) { std::this_thread::sleep_for(milliseconds(0)); }
     }
 }
 
 bool _utl::SpinLock::try_lock_for(std::chrono::milliseconds msec)
 {
-    using namespace std::chrono;
-
     auto deadline = steady_clock::now() + msec;
     while (steady_clock::now() < deadline)
     {
@@ -26,9 +23,7 @@ bool _utl::SpinLock::try_lock_for(std::chrono::milliseconds msec)
         {
             return true;
         }
-        else if (m_useSleeping) {
-            std::this_thread::sleep_for(microseconds(250));
-        }
+        else if (useSleeping) { std::this_thread::sleep_for(milliseconds(0)); }
     }
     return false;
 }
