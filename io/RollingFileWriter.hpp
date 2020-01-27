@@ -57,9 +57,9 @@ namespace _utl
                     #if defined(_MSC_VER) && !defined(__INTEL_COMPILER)
                     _fwrite_nolock(buf->data, 1, BUF_dataSize(buf), F);
                     #elif defined(__linux__)
-                    fwrite_unlocked(data, 1, size, F);
+                    fwrite_unlocked(buf->data, 1, BUF_dataSize(buf), F);
                     #else
-                    fwrite(data, 1, size, F);
+                    fwrite(buf->data, 1, BUF_dataSize(buf), F);
                     #endif
 
                     buf->cursor = buf->data;
