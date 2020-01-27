@@ -7,6 +7,14 @@
 #include <limits>
 #include <thread>
 
+#if defined(_MSC_VER) && !defined(__INTEL_COMPILER)
+#   define __forceinline __forceinline
+#elif defined(__linux__)
+#   define __forceinline __attribute__((always_inline))
+#else
+#   define __forceinline inline
+#endif
+
 namespace _utl
 {
     namespace detail
@@ -268,3 +276,5 @@ namespace _utl
 
     RollingFileWriter::~RollingFileWriter() { m_sink.close(); }
 }
+
+#undef __forceinline
