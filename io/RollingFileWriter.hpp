@@ -81,33 +81,6 @@ namespace _utl
                         }
                     }
                 }
-            private:
-                void flush(bool close)
-                {
-                    if (!F) { return; }
-
-                    while (writtingBufferB) { std::this_thread::yield(); }
-                    if (BUF_isEmpty(B) == false) {
-                        throw std::logic_error("flush: buffer B is supposed to be clear (but it isnt).");
-                    }
-                    std::swap(A, B);      // doesnt matter if A is full
-                    writtingBufferB = true; // run file writing
-
-                    while (writtingBufferB) { std::this_thread::yield(); }
-                    if (BUF_isEmpty(B) == false) {
-                        throw std::logic_error("flush: buffer B is supposed to be clear (but it isnt).");
-                    }
-                    if (close)
-                    {
-                        fileSync.lock();
-                        workerActive = false;
-                        fclose(F); F = nullptr;
-                        delete A;  A = nullptr;
-                        delete B;  B = nullptr;
-                        fileSync.unlock();
-                        if (W.joinable()) { W.join(); }
-                    }
-                }
             public:
                 void changeFile(FILE * file)
                 {
@@ -144,8 +117,39 @@ namespace _utl
                     LOCK(fileSync);
                     return ftell(F);
                 }
-                void flush() { flush(false); }
-                void close() { flush(true); }
+                void flush()
+                {
+                    LOCK(fileSync);
+                    if (F) {
+                        fileSync.unlock();
+
+                        while (writtingBufferB) { std::this_thread::yield(); }
+                        if (BUF_isEmpty(B) == false) {
+                            throw std::logic_error("flush: buffer B is supposed to be clear (but it isnt).");
+                        }
+                        std::swap(A, B);      // doesnt matter if A is full
+                        writtingBufferB = true; // run file writing
+
+                        while (writtingBufferB) { std::this_thread::yield(); }
+                        if (BUF_isEmpty(B) == false) {
+                            throw std::logic_error("flush: buffer B is supposed to be clear (but it isnt).");
+                        }
+                    }
+                }
+                void close()
+                {
+                    flush();
+
+                    workerActive = false;
+                    if (W.joinable()) { W.join(); }
+
+                    LOCK(fileSync);
+                    if (F) {
+                        fclose(F); F = nullptr;
+                        delete A;  A = nullptr;
+                        delete B;  B = nullptr;
+                    }
+                }
 
                 BackgroundWriter(size_t bufferSize, FILE * file = nullptr)
                     : A(new Buffer{ bufferSize / 2 })
@@ -158,8 +162,7 @@ namespace _utl
                     W = std::thread{ &BackgroundWriter::worker, this };
                 }
                 ~BackgroundWriter() {
-                    flush(true);
-                    if (W.joinable()) { W.join(); }
+                    close();
                 }
             };
         }
