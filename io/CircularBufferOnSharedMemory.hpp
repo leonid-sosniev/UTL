@@ -99,13 +99,13 @@ namespace _utl
         }
         uint32_t write(const void * data, uint32_t size) override {
             spinbuf->spin.lock();
-            auto l = spinbuf->buf.write(data, size);
+            auto l = spinbuf->buf._utl::CircularBuffer::write(data, size);
             spinbuf->spin.unlock();
             return l;
         }
         uint32_t read(void * data, uint32_t maxSize) override {
             spinbuf->spin.lock();
-            auto l = spinbuf->buf.read(data, maxSize);
+            auto l = spinbuf->buf._utl::CircularBuffer::read(data, maxSize);
             spinbuf->spin.unlock();
             return l;
         }
