@@ -67,21 +67,27 @@ namespace _utl
         {
             memset(&rhs, 0, sizeof(rhs));
         }
-        static CircularBufferOnSharedMemory create(const std::string & memName, uint32_t memSize)
+        static CircularBufferOnSharedMemory create(const std::string & name, uint32_t maxDataSize)
         {
+            std::string muxName = "/" + name;
 #if defined(_WIN32)
-            MUX_ID mux = CreateMutexA(NULL, false, memName.data()); // create unlocked
+            MUX_ID mux = CreateMutexA(NULL, false, muxName.data()); // create unlocked
 #elif defined(__linux__)
-            std::string muxName = "/" + memName;
             auto mux = sem_open(muxName.data(), O_CREAT, 0666, 1); // create unlocked
 #endif
             lockMux(mux);
-            auto mem = _utl::SharedMemoryRegion::create(memName, memSize, _utl::SharedMemoryRegion::AccessMode::ReadWrite);
-            auto spinbuf = static_cast<LockingBuffer*>(mem.data());
-            new (&spinbuf->spin) _utl::SpinLock();
-            auto cb = _utl::CircularBuffer::createInPlace(mem.size() - sizeof(_utl::SpinLock), &spinbuf->buf, [](void*){});
+
+            auto circularBufMemSize = _utl::CircularBuffer::getMemorySizeRequired(maxDataSize);
+            auto totalMemSize = sizeof(_utl::SpinLock) + circularBufMemSize;
+
+            auto mem = _utl::SharedMemoryRegion::create(name, totalMemSize, _utl::SharedMemoryRegion::AccessMode::ReadWrite);
+            auto lkBufRgn = static_cast<LockingBuffer*>(mem.data());
+            new (&lkBufRgn->spin) _utl::SpinLock();
+            auto cbuf = _utl::CircularBuffer::createInPlace(circularBufMemSize, &lkBufRgn->buf, [](void*){});
+
             unlockMux(mux);
-            return CircularBufferOnSharedMemory(std::move(mem), spinbuf, true);
+
+            return CircularBufferOnSharedMemory(std::move(mem), lkBufRgn, true);
         }
         static CircularBufferOnSharedMemory openExisting(const std::string & memName, uint32_t memSize)
         {
