@@ -56,6 +56,9 @@ namespace _utl
             , putPos(0)
         {}
     public:
+        static inline uint32_t getMemorySizeRequired(uint32_t maxDataSize) {
+            return sizeof(CircularBuffer) + maxDataSize;
+        }
         static inline CircularBuffer * createInPlace(uint32_t blockSize, void * block, std::function<void(void*)> deleter)
         {
             if (sizeof(CircularBuffer) >= blockSize) {
