@@ -151,8 +151,10 @@ namespace _utl
             return SharedMemoryRegion(h,p,size);
             #elif defined(__linux__)
             auto h = shm_open(name.data(), O_CREAT | O_RDWR, 0666);
+            if (h < 0) throwExceptionFromNativeErrorCode();
             ftruncate(h, size);
             auto p = mmap(0, size, (int) access, MAP_SHARED, h, 0);
+            if (p < 0) throwExceptionFromNativeErrorCode();
             return SharedMemoryRegion(CPY_ID(name), p, size);
             #endif
         }
@@ -168,7 +170,9 @@ namespace _utl
             return SharedMemoryRegion(h, p, size);
             #elif defined(__linux__)
             auto h = shm_open(name.data(), O_RDWR, 0666);
+            if (h < 0) throwExceptionFromNativeErrorCode();
             auto p = mmap(0, size, (int) access, MAP_SHARED, h, 0);
+            if (p < 0) throwExceptionFromNativeErrorCode();
             return SharedMemoryRegion(CPY_ID(name), p, size);
             #endif
         }
