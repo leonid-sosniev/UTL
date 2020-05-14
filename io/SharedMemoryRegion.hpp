@@ -22,7 +22,7 @@ namespace _utl
 
     class SharedMemoryRegion {
     private:
-#if defined(_WIN32)
+        #if defined(_WIN32)
         static void throwExceptionFromWin32LastErrorCode()
         {
             auto err = GetLastError();
@@ -44,11 +44,11 @@ namespace _utl
         #define CPY_ID(s) s
         #define DEL_ID(s)
         using RegionId = HANDLE;
-#elif defined(__linux__)
+        #elif defined(__linux__)
         #define CPY_ID(s) strcpy(new char[s.size() + 1], s.data())
         #define DEL_ID(s) delete[] s
         using RegionId = const char *;
-#endif
+        #endif
         RegionId regionId;
         void * viewPtr;
         uint32_t viewSize;
@@ -60,22 +60,22 @@ namespace _utl
         {}
     public:
         enum class AccessMode {
-#if defined(_WIN32)
+            #if defined(_WIN32)
             Read = FILE_MAP_READ, Write = FILE_MAP_WRITE, ReadWrite = FILE_MAP_ALL_ACCESS
-#elif defined(__linux__)
+            #elif defined(__linux__)
             Read = PROT_READ, Write = PROT_WRITE, ReadWrite = PROT_WRITE | PROT_READ
-#endif
+            #endif
         };
 
         ~SharedMemoryRegion()
         {
-#if defined(_WIN32)
+            #if defined(_WIN32)
             if (viewPtr) { UnmapViewOfFile(viewPtr); }
             if (regionId) { CloseHandle(regionId); }
-#elif defined(__linux__)
+            #elif defined(__linux__)
             if (viewPtr) { munmap(viewPtr, viewSize); }
             if (regionId) { shm_unlink(regionId); }
-#endif
+            #endif
             DEL_ID(regionId);
         }
         SharedMemoryRegion()
@@ -100,23 +100,23 @@ namespace _utl
 
         static SharedMemoryRegion create(std::string name, uint32_t size, AccessMode access = AccessMode::ReadWrite)
         {
-#if defined(_WIN32)
+            #if defined(_WIN32)
             name = "Global\\" + name;
             auto h = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, (DWORD)size, name.data());
             if (!h) { throwExceptionFromWin32LastErrorCode(); }
             auto p = MapViewOfFile(h, (DWORD) access, 0, 0, size);
             if (!p) { throwExceptionFromWin32LastErrorCode(); }
             return SharedMemoryRegion(h,p,size);
-#elif defined(__linux__)
+            #elif defined(__linux__)
             auto h = shm_open(name.data(), O_CREAT | O_RDWR, 0666);
             ftruncate(h, size);
             auto p = mmap(0, size, (int) access, MAP_SHARED, h, 0);
             return SharedMemoryRegion(CPY_ID(name), p, size);
-#endif
+            #endif
         }
         static SharedMemoryRegion openExisting(std::string name, uint32_t size, AccessMode access = AccessMode::ReadWrite)
         {
-#if defined(_WIN32)
+            #if defined(_WIN32)
             name = "Global\\" + name;
             auto h = OpenFileMappingA((DWORD) access, false, name.data());
             if (!h) { throwExceptionFromWin32LastErrorCode(); }
@@ -124,11 +124,11 @@ namespace _utl
             auto p = MapViewOfFile(h, (DWORD) access, 0, 0, size);
             if (!p) { throwExceptionFromWin32LastErrorCode(); }
             return SharedMemoryRegion(h, p, size);
-#elif defined(__linux__)
+            #elif defined(__linux__)
             auto h = shm_open(name.data(), O_RDWR, 0666);
             auto p = mmap(0, size, (int) access, MAP_SHARED, h, 0);
             return SharedMemoryRegion(CPY_ID(name), p, size);
-#endif
+            #endif
         }
         void * data() { return viewPtr; }
         size_t size() { return viewSize; }
