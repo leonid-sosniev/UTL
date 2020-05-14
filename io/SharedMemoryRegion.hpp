@@ -55,16 +55,11 @@ namespace _utl
             switch (err)
             {
                 case ERROR_FILE_NOT_FOUND:
-                case ERROR_PATH_NOT_FOUND: throw std::runtime_error("Name does not exist."); break;
-                case ERROR_ACCESS_DENIED: throw std::runtime_error("Acces denied."); break;
-                case ERROR_NOT_ENOUGH_MEMORY: throw std::runtime_error("OS has not enough memory."); break;
-                default: {
-                    std::string msg; msg.reserve(64);
-                    msg.append("Creation of shared memory segment failed. Win32 errcode: ");
-                    msg.append(std::to_string(err));
-                    msg.append(".");
-                    throw std::runtime_error(msg);
-                }
+                case ERROR_PATH_NOT_FOUND: throw NameNotExistException(err, "Name does not exist."); break;
+                case ERROR_ACCESS_DENIED: throw AccessDeniedException(err, "Access denied."); break;
+                case ERROR_NOT_ENOUGH_MEMORY: throw OutOfMemoryException(err, "OS has not enough memory."); break;
+                default:
+                    throw Exception(err, "Construction failed. See native error code."); break;
             }
         }
         #define CPY_ID(s) s
