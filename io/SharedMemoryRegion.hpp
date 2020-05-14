@@ -23,7 +23,7 @@ namespace _utl
     class SharedMemoryRegion {
     private:
         #if defined(_WIN32)
-        static void throwExceptionFromWin32LastErrorCode()
+        static void throwExceptionFromNativeErrorCode()
         {
             auto err = GetLastError();
             switch (err)
@@ -103,9 +103,9 @@ namespace _utl
             #if defined(_WIN32)
             name = "Global\\" + name;
             auto h = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, (DWORD)size, name.data());
-            if (!h) { throwExceptionFromWin32LastErrorCode(); }
+            if (!h) { throwExceptionFromNativeErrorCode(); }
             auto p = MapViewOfFile(h, (DWORD) access, 0, 0, size);
-            if (!p) { throwExceptionFromWin32LastErrorCode(); }
+            if (!p) { throwExceptionFromNativeErrorCode(); }
             return SharedMemoryRegion(h,p,size);
             #elif defined(__linux__)
             auto h = shm_open(name.data(), O_CREAT | O_RDWR, 0666);
@@ -119,10 +119,10 @@ namespace _utl
             #if defined(_WIN32)
             name = "Global\\" + name;
             auto h = OpenFileMappingA((DWORD) access, false, name.data());
-            if (!h) { throwExceptionFromWin32LastErrorCode(); }
+            if (!h) { throwExceptionFromNativeErrorCode(); }
 
             auto p = MapViewOfFile(h, (DWORD) access, 0, 0, size);
-            if (!p) { throwExceptionFromWin32LastErrorCode(); }
+            if (!p) { throwExceptionFromNativeErrorCode(); }
             return SharedMemoryRegion(h, p, size);
             #elif defined(__linux__)
             auto h = shm_open(name.data(), O_RDWR, 0666);
