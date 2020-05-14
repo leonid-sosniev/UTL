@@ -66,6 +66,27 @@ namespace _utl
         #define DEL_ID(s)
         using RegionId = HANDLE;
         #elif defined(__linux__)
+        static void throwExceptionFromNativeErrorCode()
+        {
+            int err = errno;
+            #define ERR std::error_code{err,std::system_category()}
+            switch (err)
+            {
+                case MAP_DENYWRITE:
+                case EPERM:
+                case EACCES: throw AccessDeniedException(ERR, "Permission was denied to shm_open() name in the specified mode, or O_TRUNC was specified and the caller does not have write permission on the object."); break;
+                case ENOENT: throw NameNotExistException(ERR, "An attempt was made to shm_open() a name that did not exist, and O_CREAT was not specified."); break;
+                case EMFILE: throw Exception(ERR, "The per-process limit on the number of open file descriptors has been reached."); break;
+                case ENFILE: throw Exception(ERR, "The system-wide limit on the total number of open files has been reached."); break;
+                case EEXIST: throw Exception(ERR, "Both O_CREAT and O_EXCL were specified to shm_open() and the shared memory object specified by name already exists.");
+                case EINVAL: throw BadNameException(ERR, "The name argument to shm_open() was invalid."); break;
+                case ENAMETOOLONG: throw BadNameException(ERR, "The length of name exceeds PATH_MAX."); break;
+                case EOVERFLOW:
+                case ENOMEM: throw OutOfMemoryException(ERR, "No memory is available. Or: the process's maximum number of mappings would have been exceeded."); break;
+                default: throw Exception(ERR, "Construction failed. See native error code."); break;
+            }
+            #undef ERR
+        }
         #define CPY_ID(s) strcpy(new char[s.size() + 1], s.data())
         #define DEL_ID(s) delete[] s
         using RegionId = const char *;
