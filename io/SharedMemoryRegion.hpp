@@ -21,6 +21,32 @@ namespace _utl
 {
 
     class SharedMemoryRegion {
+    public:
+        class Exception : public std::system_error {
+        public:
+            Exception(std::error_code err, const char * const msg) : std::system_error(err, msg) {}
+            virtual ~Exception() {}
+        };
+        class NameNotExistException : public Exception {
+        public:
+            NameNotExistException(std::error_code err, const char * const msg) : Exception(err, msg) {}
+            virtual ~NameNotExistException() {}
+        };
+        class BadNameException : public Exception {
+        public:
+            BadNameException(std::error_code err, const char * const msg) : Exception(err, msg) {}
+            virtual ~BadNameException() {}
+        };
+        class OutOfMemoryException : public Exception {
+        public:
+            OutOfMemoryException(std::error_code err, const char * const msg) : Exception(err, msg) {}
+            virtual ~OutOfMemoryException() {}
+        };
+        class AccessDeniedException : public Exception {
+        public:
+            AccessDeniedException(std::error_code err, const char * const msg) : Exception(err, msg) {}
+            virtual ~AccessDeniedException() {}
+        };
     private:
         #if defined(_WIN32)
         static void throwExceptionFromNativeErrorCode()
