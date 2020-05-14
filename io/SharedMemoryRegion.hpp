@@ -17,6 +17,30 @@
 #include <cctype>
 #include <stdexcept>
 
+#if defined(UTL_LOG_SHARED_MEMORY_REGION)
+
+#include <utl/io/StdStreamWriter.hpp>
+#include <utl/diagnostics/log-formatters/plaintextformatter.hpp>
+#include <utl/diagnostics/logging.h>
+
+struct StaticCtor
+{
+    StaticCtor()
+    {
+        static _utl::StdStreamWriter wt{&std::cerr};
+        static _utl::PlainTextEventFormatter fmt;
+        _utl::Logger::setGlobalEventLog(&fmt, &wt);
+        _utl::Logger::setFlushFreq(_utl::SeverityLevel::Spam, 1);
+    }
+};
+#define UTL_SHARED_MEMORY_REGION_LOG(msg, ...) UTL_logev(Spam, "[$f - $l:$m; $t] " msg ,##__VA_ARGS__)
+
+#else
+
+#define UTL_SHARED_MEMORY_REGION_LOG(msg, ...)
+
+#endif
+
 namespace _utl
 {
 
@@ -24,33 +48,34 @@ namespace _utl
     public:
         class Exception : public std::system_error {
         public:
-            Exception(std::error_code err, const char * const msg) : std::system_error(err, msg) {}
+            Exception(std::error_code err, const char * const msg) : std::system_error(err, msg) { UTL_SHARED_MEMORY_REGION_LOG("exc.msg.:$ZS", msg); }
             virtual ~Exception() {}
         };
         class NameNotExistException : public Exception {
         public:
-            NameNotExistException(std::error_code err, const char * const msg) : Exception(err, msg) {}
+            NameNotExistException(std::error_code err, const char * const msg) : Exception(err, msg) { UTL_SHARED_MEMORY_REGION_LOG("exc.msg.:$ZS", msg); }
             virtual ~NameNotExistException() {}
         };
         class BadNameException : public Exception {
         public:
-            BadNameException(std::error_code err, const char * const msg) : Exception(err, msg) {}
+            BadNameException(std::error_code err, const char * const msg) : Exception(err, msg) { UTL_SHARED_MEMORY_REGION_LOG("exc.msg.:$ZS", msg); }
             virtual ~BadNameException() {}
         };
         class OutOfMemoryException : public Exception {
         public:
-            OutOfMemoryException(std::error_code err, const char * const msg) : Exception(err, msg) {}
+            OutOfMemoryException(std::error_code err, const char * const msg) : Exception(err, msg) { UTL_SHARED_MEMORY_REGION_LOG("exc.msg.:$ZS", msg); }
             virtual ~OutOfMemoryException() {}
         };
         class AccessDeniedException : public Exception {
         public:
-            AccessDeniedException(std::error_code err, const char * const msg) : Exception(err, msg) {}
+            AccessDeniedException(std::error_code err, const char * const msg) : Exception(err, msg) { UTL_SHARED_MEMORY_REGION_LOG("exc.msg.:$ZS", msg); }
             virtual ~AccessDeniedException() {}
         };
     private:
         #if defined(_WIN32)
         static void throwExceptionFromNativeErrorCode()
         {
+            UTL_SHARED_MEMORY_REGION_LOG("");
             auto err = GetLastError();
             switch (err)
             {
@@ -68,8 +93,10 @@ namespace _utl
         #elif defined(__linux__)
         static void throwExceptionFromNativeErrorCode()
         {
+            UTL_SHARED_MEMORY_REGION_LOG("");
             int err = errno;
             #define ERR std::error_code{err,std::system_category()}
+            UTL_SHARED_MEMORY_REGION_LOG("");
             switch (err)
             {
                 case MAP_DENYWRITE:
@@ -99,7 +126,7 @@ namespace _utl
             : viewSize(size)
             , viewPtr(ptr)
             , regionId(hdl)
-        {}
+        { UTL_SHARED_MEMORY_REGION_LOG(""); }
     public:
         enum class AccessMode {
             #if defined(_WIN32)
@@ -112,11 +139,11 @@ namespace _utl
         ~SharedMemoryRegion()
         {
             #if defined(_WIN32)
-            if (viewPtr) { UnmapViewOfFile(viewPtr); }
-            if (regionId) { CloseHandle(regionId); }
+            if (viewPtr) { UTL_SHARED_MEMORY_REGION_LOG("unmaping"); UnmapViewOfFile(viewPtr); }
+            if (regionId) { UTL_SHARED_MEMORY_REGION_LOG("closing"); CloseHandle(regionId); }
             #elif defined(__linux__)
-            if (viewPtr) { munmap(viewPtr, viewSize); }
-            if (regionId) { shm_unlink(regionId); }
+            if (viewPtr) { UTL_SHARED_MEMORY_REGION_LOG("unmaping"); munmap(viewPtr, viewSize); }
+            if (regionId) { UTL_SHARED_MEMORY_REGION_LOG("closing"); shm_unlink(regionId); }
             #endif
             DEL_ID(regionId);
         }
@@ -128,12 +155,14 @@ namespace _utl
             , viewSize(rhs.viewSize)
             , regionId(rhs.regionId)
         {
+            UTL_SHARED_MEMORY_REGION_LOG("");
             memset(&rhs, 0, sizeof(rhs));
         }
         SharedMemoryRegion(const SharedMemoryRegion &) = delete;
 
         SharedMemoryRegion & operator=(SharedMemoryRegion && rhs)
         {
+            UTL_SHARED_MEMORY_REGION_LOG("");
             memcpy(this, &rhs, sizeof(rhs));
             memset(&rhs, 0000, sizeof(rhs));
             return *this;
@@ -142,37 +171,49 @@ namespace _utl
 
         static SharedMemoryRegion create(std::string name, uint32_t size, AccessMode access = AccessMode::ReadWrite)
         {
+            UTL_SHARED_MEMORY_REGION_LOG("name='$ZS', size=$WU, access=$WU", name.data(), size, (uint32_t)access);
             #if defined(_WIN32)
             name = "Global\\" + name;
+            UTL_SHARED_MEMORY_REGION_LOG("");
             auto h = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, (DWORD)size, name.data());
             if (!h) { throwExceptionFromNativeErrorCode(); }
+            UTL_SHARED_MEMORY_REGION_LOG("");
             auto p = MapViewOfFile(h, (DWORD) access, 0, 0, size);
             if (!p) { throwExceptionFromNativeErrorCode(); }
+            UTL_SHARED_MEMORY_REGION_LOG("");
             return SharedMemoryRegion(h,p,size);
             #elif defined(__linux__)
+            UTL_SHARED_MEMORY_REGION_LOG("");
             auto h = shm_open(name.data(), O_CREAT | O_RDWR, 0666);
             if (h < 0) throwExceptionFromNativeErrorCode();
+            UTL_SHARED_MEMORY_REGION_LOG("");
             ftruncate(h, size);
+            UTL_SHARED_MEMORY_REGION_LOG("");
             auto p = mmap(0, size, (int) access, MAP_SHARED, h, 0);
             if (p < 0) throwExceptionFromNativeErrorCode();
+            UTL_SHARED_MEMORY_REGION_LOG("");
             return SharedMemoryRegion(CPY_ID(name), p, size);
             #endif
         }
         static SharedMemoryRegion openExisting(std::string name, uint32_t size, AccessMode access = AccessMode::ReadWrite)
         {
+            UTL_SHARED_MEMORY_REGION_LOG("");
             #if defined(_WIN32)
             name = "Global\\" + name;
             auto h = OpenFileMappingA((DWORD) access, false, name.data());
             if (!h) { throwExceptionFromNativeErrorCode(); }
-
+            UTL_SHARED_MEMORY_REGION_LOG("");
             auto p = MapViewOfFile(h, (DWORD) access, 0, 0, size);
             if (!p) { throwExceptionFromNativeErrorCode(); }
+            UTL_SHARED_MEMORY_REGION_LOG("");
             return SharedMemoryRegion(h, p, size);
             #elif defined(__linux__)
             auto h = shm_open(name.data(), O_RDWR, 0666);
             if (h < 0) throwExceptionFromNativeErrorCode();
+            UTL_SHARED_MEMORY_REGION_LOG("");
             auto p = mmap(0, size, (int) access, MAP_SHARED, h, 0);
             if (p < 0) throwExceptionFromNativeErrorCode();
+            UTL_SHARED_MEMORY_REGION_LOG("");
             return SharedMemoryRegion(CPY_ID(name), p, size);
             #endif
         }
@@ -184,3 +225,4 @@ namespace _utl
 
 #undef DEL_ID
 #undef CPY_ID
+#undef UTL_SHARED_MEMORY_REGION_LOG
