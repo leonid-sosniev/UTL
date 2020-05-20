@@ -1,6 +1,7 @@
 #pragma once
 
 #include <thread>
+#include <mutex>
 #include <utl/io/SharedMemoryRegion.hpp>
 #include <utl/io/CircularBuffer.hpp>
 #include <utl/threading/Spinlock.hpp>
@@ -14,6 +15,131 @@
 
 namespace _utl
 {
+
+    class NamedMutex {
+    private:
+#if defined(_WIN32)
+        using MUX_ID = HANDLE;
+#elif defined(__linux__)
+        using MUX_ID = sem_t*;
+#endif
+        MUX_ID mux;
+        explicit NamedMutex(MUX_ID mux) : mux(mux)
+        {
+            if (mux == (MUX_ID) 0)
+            {
+                throw std::system_error{ std::error_code{errno,std::system_category()} };
+            }
+        }
+    public:
+        static void removeName(const std::string & name)
+        {
+            int s = sem_unlink(name.data());
+        }
+        static NamedMutex createNew(const std::string & name_)
+        {
+            #if defined(_WIN32)
+            return NamedMutex{
+                CreateMutexA(NULL, false, name.c_str())
+            };
+            #elif defined(__linux__)
+            auto name = (name_.size() && name_[0] != '/') ? "/" + name_ : name_;
+            return NamedMutex{
+                sem_open(name.c_str(), O_CREAT | O_EXCL, 0666, 1)
+            };
+            #endif
+        }
+        static NamedMutex openExisting(const std::string & name_)
+        {
+            #if defined(_WIN32)
+            return NamedMutex{
+                OpenMutexA(MUTEX_ALL_ACCESS, false, name.c_str())
+            };
+            #elif defined(__linux__)
+            auto name = (name_.size() && name_[0] != '/') ? "/" + name_ : name_;
+            return NamedMutex{
+                sem_open(name.c_str(), 0)
+            };
+            #endif
+        }
+
+        NamedMutex() : mux((MUX_ID) 0)
+        {
+        }
+        NamedMutex(NamedMutex && rhs) : mux(rhs.mux)
+        {
+            rhs.mux = (MUX_ID) 0;
+        }
+        NamedMutex & operator = (NamedMutex && rhs)
+        {
+            mux = rhs.mux;
+            rhs.mux = (MUX_ID) 0;
+            return *this;
+        }
+        NamedMutex & operator = (const NamedMutex & rhs) = delete;
+        ~NamedMutex()
+        {
+            if (mux) {
+                #if defined(_WIN32)
+                CloseHandle(mux);
+                #elif defined(__linux__)
+                auto s = sem_close(mux);
+                if (s < 0) {
+                    throw std::system_error{ std::error_code{errno,std::system_category()} };
+                }
+                #endif
+            }
+        }
+
+        void lock()
+        {
+            #if defined(_WIN32)
+            WaitForSingleObject(mux, INFINITE);
+            #elif defined(__linux__)
+            int s = sem_wait(mux);
+            if (s < 0) {
+                throw std::system_error{ std::error_code{errno,std::system_category()} };
+            }
+            #endif
+        }
+        bool try_lock()
+        {
+            #if defined(_WIN32)
+            auto s = WaitForSingleObject(mux, 0);
+            if (s == WAIT_OBJECT_0) {
+                return true;
+            }
+            if (s == WAIT_TIMEOUT) {
+                return false;
+            }
+            if (s == WAIT_ABANDONED) {
+                throw std::system_error{ std::error_code{WAIT_ABANDONED,std::system_category()} };
+            } else {
+                throw std::system_error{ std::error_code{GetLastError(),std::system_category()} };
+            }
+            #elif defined(__linux__)
+            int s = sem_trywait(mux);
+            if (s < 0) {
+                if (errno == EAGAIN) {
+                    return false;
+                }
+                throw std::system_error{ std::error_code{errno,std::system_category()} };
+            }
+            return true;
+            #endif
+        }
+        void unlock()
+        {
+            #if defined(_WIN32)
+            ReleaseMutex(mux);
+            #elif defined(__linux__)
+            int s = sem_post(mux);
+            if (s < 0) {
+                throw std::system_error{ std::error_code{errno,std::system_category()} };
+            }
+            #endif
+        }
+    };
 
     class CircularBufferOnSharedMemory : public _utl::AbstractReader, public _utl::AbstractWriter {
     private:
