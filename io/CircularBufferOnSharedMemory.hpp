@@ -89,6 +89,7 @@ namespace _utl
                 }
                 #endif
             }
+            else { UTL_SHARED_MEMORY_REGION_LOG("closing null mutex)"); }
         }
 
         void lock()
