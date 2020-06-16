@@ -119,17 +119,19 @@ namespace _utl
             }
             #undef ERR
         }
-        #define CPY_ID(s) strcpy(new char[s.size() + 1], s.data())
-        #define DEL_ID(s) delete[] s
-        using RegionId = const char *;
+        #define CPY_ID(s) s
+        #define DEL_ID(s) s
+        using RegionId = int;
         #endif
-        RegionId regionId;
+        std::string nm;
         void * viewPtr;
+        RegionId regionId;
         uint32_t viewSize;
 
-        SharedMemoryRegion(RegionId hdl, void *ptr, uint32_t size)
+        SharedMemoryRegion(RegionId hdl, void *ptr, uint32_t size, std::string name = "")
             : viewSize(size)
             , viewPtr(ptr)
+            , nm(std::move(name))
             , regionId(hdl)
         { UTL_SHARED_MEMORY_REGION_LOG(""); }
     public:
@@ -148,17 +150,19 @@ namespace _utl
             if (regionId) { UTL_SHARED_MEMORY_REGION_LOG("closing"); CloseHandle(regionId); }
             #elif defined(__linux__)
             if (viewPtr) { UTL_SHARED_MEMORY_REGION_LOG("unmaping"); munmap(viewPtr, viewSize); }
-            if (regionId) { UTL_SHARED_MEMORY_REGION_LOG("closing"); shm_unlink(regionId); }
+            if (regionId) { UTL_SHARED_MEMORY_REGION_LOG("closing"); close(regionId); }
+            if (nm.size() > 0) { shm_unlink(nm.c_str()); }
             #endif
             DEL_ID(regionId);
         }
         SharedMemoryRegion()
-            : SharedMemoryRegion(0, 0, 0)
+            : SharedMemoryRegion(0, 0, 0, "")
         {}
         SharedMemoryRegion(SharedMemoryRegion && rhs)
             : viewPtr(rhs.viewPtr)
             , viewSize(rhs.viewSize)
             , regionId(rhs.regionId)
+            , nm(std::move(rhs.nm))
         {
             UTL_SHARED_MEMORY_REGION_LOG("");
             memset(&rhs, 0, sizeof(rhs));
@@ -168,7 +172,11 @@ namespace _utl
         SharedMemoryRegion & operator=(SharedMemoryRegion && rhs)
         {
             UTL_SHARED_MEMORY_REGION_LOG("");
-            memcpy(this, &rhs, sizeof(rhs));
+            this->SharedMemoryRegion::~SharedMemoryRegion();
+            viewPtr = rhs.viewPtr;
+            viewSize = rhs.viewSize;
+            regionId = rhs.regionId;
+            nm = std::move(rhs.nm);
             memset(&rhs, 0000, sizeof(rhs));
             return *this;
         }
@@ -197,7 +205,7 @@ namespace _utl
             auto p = mmap(0, size, (int) access, MAP_SHARED, h, 0);
             if (p < 0) throwExceptionFromNativeErrorCode();
             UTL_SHARED_MEMORY_REGION_LOG("");
-            return SharedMemoryRegion(CPY_ID(name), p, size);
+            return SharedMemoryRegion(h, p, size, name);
             #endif
         }
         static SharedMemoryRegion openExisting(std::string name, uint32_t size, AccessMode access = AccessMode::ReadWrite)
@@ -219,7 +227,7 @@ namespace _utl
             auto p = mmap(0, size, (int) access, MAP_SHARED, h, 0);
             if (p < 0) throwExceptionFromNativeErrorCode();
             UTL_SHARED_MEMORY_REGION_LOG("");
-            return SharedMemoryRegion(CPY_ID(name), p, size);
+            return SharedMemoryRegion(h, p, size, "");
             #endif
         }
         void * data() { return viewPtr; }
