@@ -27,6 +27,9 @@ namespace _utl
             auto continuousBlockSize = minimal(bufferSize - getPos, readableSize);
 
             std::memcpy(dst, &buffer[getPos], continuousBlockSize);
+#if defined(UTL_CIRCULAR_BUFFER_ERASE_READ_BYTES)
+            std::memset(&buffer[getPos], 0, continuousBlockSize);
+#endif
             
             getPos += continuousBlockSize;
             getPos = (getPos == bufferSize) ? 0 : getPos;
