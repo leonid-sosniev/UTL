@@ -56,6 +56,11 @@ namespace _utl
             NameNotExistException(std::error_code err, const char * const msg) : Exception(err, msg) { UTL_SHARED_MEMORY_REGION_LOG("exc.msg.:$ZS", msg); }
             virtual ~NameNotExistException() {}
         };
+        class NameAlreadyExistException : public Exception {
+        public:
+            NameAlreadyExistException(std::error_code err, const char * const msg) : Exception(err, msg) { UTL_SHARED_MEMORY_REGION_LOG("exc.msg.:$ZS", msg); }
+            virtual ~NameAlreadyExistException() {}
+        };
         class BadNameException : public Exception {
         public:
             BadNameException(std::error_code err, const char * const msg) : Exception(err, msg) { UTL_SHARED_MEMORY_REGION_LOG("exc.msg.:$ZS", msg); }
@@ -105,7 +110,7 @@ namespace _utl
                 case ENOENT: throw NameNotExistException(ERR, "An attempt was made to shm_open() a name that did not exist, and O_CREAT was not specified."); break;
                 case EMFILE: throw Exception(ERR, "The per-process limit on the number of open file descriptors has been reached."); break;
                 case ENFILE: throw Exception(ERR, "The system-wide limit on the total number of open files has been reached."); break;
-                case EEXIST: throw Exception(ERR, "Both O_CREAT and O_EXCL were specified to shm_open() and the shared memory object specified by name already exists.");
+                case EEXIST: throw NameAlreadyExistException(ERR, "Both O_CREAT and O_EXCL were specified to shm_open() and the shared memory object specified by name already exists.");
                 case EINVAL: throw BadNameException(ERR, "The name argument to shm_open() was invalid."); break;
                 case ENAMETOOLONG: throw BadNameException(ERR, "The length of name exceeds PATH_MAX."); break;
                 case EOVERFLOW:
