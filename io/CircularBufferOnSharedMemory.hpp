@@ -230,15 +230,13 @@ namespace _utl
             return CircularBufferOnSharedMemory(std::move(mem), spinbuf, false);
         }
         uint32_t write(const void * data, uint32_t size) override {
-            spinbuf->spin.lock();
+            std::unique_lock<decltype(spinbuf->spin)> lock(spinbuf->spin);
             auto l = spinbuf->buf._utl::CircularBuffer::write(data, size);
-            spinbuf->spin.unlock();
             return l;
         }
         uint32_t read(void * data, uint32_t maxSize) override {
-            spinbuf->spin.lock();
+            std::unique_lock<decltype(spinbuf->spin)> lock(spinbuf->spin);
             auto l = spinbuf->buf._utl::CircularBuffer::read(data, maxSize);
-            spinbuf->spin.unlock();
             return l;
         }
         bool flush() override { return true; }
