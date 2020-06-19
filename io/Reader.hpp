@@ -6,6 +6,12 @@ namespace _utl
 
     class AbstractReader {
     public:
+        /**
+         * @param data -- pointer to output buffer
+         * @param size -- byte count to be sent
+         * @return -- number of successfuly written bytes
+         * @throw  -- std::invalid_argument if (data == nullptr and size != 0)
+         */
         virtual uint32_t read(void * data, uint32_t maxSize) = 0;
         virtual ~AbstractReader() {}
     };

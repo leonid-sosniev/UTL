@@ -6,8 +6,19 @@ namespace _utl
 
     class AbstractWriter {
     public:
+        /**
+         * @param data -- pointer to input buffer
+         * @param size -- byte count to be sent
+         * @return -- number of successfuly written bytes
+         * @throw  -- std::invalid_argument if (data == nullptr and size != 0)
+         */
         virtual uint32_t write(const void * data, uint32_t size) = 0;
+
+        /**
+         * @return -- true if buffers (if any) were flushed successfuly
+         */
         virtual bool flush() = 0;
+
         virtual ~AbstractWriter() {}
     };
 
