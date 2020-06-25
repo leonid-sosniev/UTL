@@ -1,0 +1,74 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "inputs": [
+        {
+            "id": "ExeName",
+            "type": "promptString",
+            "description": "Name of executable in release/",
+        },
+        {
+            "id": "ProjectDir",
+            "type": "promptString",
+            "description": "Subdirectory in utl/",
+        },
+        {
+            "id": "CmdArgs",
+            "type": "promptString",
+            "description": "Command line args to apply",
+        },
+        {
+            "id": "CppStd",
+            "description": "C++ language standard number",
+            "type": "pickString",
+            "options": [ "c++11", "c++14", "c++17" ],
+            "default": "c++14",
+        }
+    ],
+    "tasks": [
+        {
+            "label": "g++BuildApp",
+            "type": "shell",
+            "command": "g++",
+            "args": [
+                "-o", "${workspaceFolder}/release/${input:ExeName}",
+                "-x", "c++", "-g", "-O0", "-std=${input:CppStd}", "-pipe", "-pthread",
+                "-B", "/usr/local/include",
+                "-I/usr/local/include/",
+                "-I${workspaceFolder}/include",
+                "-v", "${workspaceFolder}/src/*.cpp",
+                "-v", "/usr/local/include/utl/diagnostics/log-formatters/*.cpp",
+                "-v", "/usr/local/include/utl/diagnostics/*.cpp",
+                "-v", "/usr/local/include/utl/threading/Spinlock.cpp",
+                "-lrt", "-lcrypto", "-lstdc++fs"
+            ],
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "g++BuildTests",
+            "type": "shell",
+            "command": "g++",
+            "args": [
+                "-o", "${workspaceFolder}/${input:ProjectDir}/tests/tester",
+                "-x", "c++", "-g", "-O0", "-std=${input:CppStd}", "-pipe", "-pthread",
+                "-B", "/usr/local/include",
+                "-I/usr/local/include/",
+                "-I${workspaceFolder}/../",
+                "-v", "${workspaceFolder}/${input:ProjectDir}/tests/*.cpp",
+                "-lrt", "-lcrypto", "-lstdc++fs"
+            ],
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build and Git",
+            "type": "shell",
+            "command": "git commit -a -m '[build OK]'",
+            "dependsOn": [ "g++Build" ],
+            "group": "build",
+            "problemMatcher": []
+        },
+    ]
+}
