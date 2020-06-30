@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "thread": "cpp",
+        "filesystem": "cpp",
         "stdexcept": "cpp"
     },
     "C_Cpp.intelliSenseEngineFallback": "Enabled",
