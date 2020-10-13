@@ -28,4 +28,12 @@ TEST_CASE("get number of fields in struct", "introspection")
     REQUIRE(numS == 3);
     REQUIRE(numM == 3);
     REQUIRE(numD == 4);
+
+    constexpr size_t recS = _utl::getFieldCountRecursive<S>();
+    constexpr size_t recM = _utl::getFieldCountRecursive<M>();
+    constexpr size_t recD = _utl::getFieldCountRecursive<D>();
+
+    REQUIRE(recS == 3);
+    REQUIRE(recM == 5);
+    REQUIRE(recD == 10);
 }
