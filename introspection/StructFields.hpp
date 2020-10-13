@@ -8,6 +8,42 @@ namespace _utl
     template<class T> inline constexpr size_t getFieldCount();
     template<class T> inline constexpr size_t getFieldCountRecursive();
 
+    namespace TypeSig
+    {
+        template<class T> struct Tag {};
+        using Id = uint16_t;
+
+        inline constexpr Id type_id(Tag<       void>) { return 'V'; }
+        inline constexpr Id type_id(Tag<       char>) { return 'c'; }
+        inline constexpr Id type_id(Tag<   char16_t>) { return 'w'; }
+        inline constexpr Id type_id(Tag<   char32_t>) { return 'u'; }
+        inline constexpr Id type_id(Tag<      float>) { return 'f'; }
+        inline constexpr Id type_id(Tag<     double>) { return 'd'; }
+        inline constexpr Id type_id(Tag<long double>) { return 'x'; }
+        inline constexpr Id type_id(Tag<    uint8_t>) { return 'B'; }
+        inline constexpr Id type_id(Tag<     int8_t>) { return 'b'; }
+        inline constexpr Id type_id(Tag<   uint16_t>) { return 'H'; }
+        inline constexpr Id type_id(Tag<    int16_t>) { return 'h'; }
+        inline constexpr Id type_id(Tag<   uint32_t>) { return 'I'; }
+        inline constexpr Id type_id(Tag<    int32_t>) { return 'i'; }
+        inline constexpr Id type_id(Tag<   uint64_t>) { return 'L'; }
+        inline constexpr Id type_id(Tag<    int64_t>) { return 'l'; }
+        template<class T> inline constexpr Id type_id(Tag<T>) { return '?'; }
+
+        template<class T> inline constexpr Id type_id(Tag<const T>   ) { return type_id(Tag<T>{}); }
+        template<class T> inline constexpr Id type_id(Tag<volatile T>) { return type_id(Tag<T>{}); }
+        template<class T> inline constexpr Id type_id(Tag<T&>        ) { return type_id(Tag<T*>{}); }
+        template<class T> inline constexpr Id type_id(Tag<T*>        ) { return type_id(Tag<T>{}) + 0x100; }
+
+        template<class Obj, class Ret, class...Args> inline constexpr Id type_id(Tag<Ret(Obj::*)(Args...)>) { return 'M'; }
+        template<class Ret, class...Args>            inline constexpr Id type_id(Tag<Ret(*)(Args...)>     ) { return 'F'; }
+        template<class T> inline constexpr Id type_id(Tag<typename std::enable_if<std::is_union<T>::value      ,T>::type>) { return 'U'; }
+        template<class T> inline constexpr Id type_id(Tag<typename std::enable_if<std::is_enum<T>::value       ,T>::type>) { return 'E'; }
+        template<class T> inline constexpr Id type_id(Tag<typename std::enable_if<std::is_polymorphic<T>::value,T>::type>) { return 'P'; }
+
+        template<class T> inline constexpr Id type_id() { return type_id(Tag<T>{}); }
+    };
+
     namespace details { namespace StructFields
     {
         template<class Pod> struct GetFieldCount {
