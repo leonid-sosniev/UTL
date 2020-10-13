@@ -5,6 +5,9 @@
 
 namespace _utl
 {
+    template<class T> inline constexpr size_t getFieldCount();
+    template<class T> inline constexpr size_t getFieldCountRecursive();
+
     namespace details { namespace StructFields
     {
         template<class Pod> struct GetFieldCount {
@@ -44,9 +47,34 @@ namespace _utl
         public:
             static constexpr size_t value = cnt<0,MAX_POSSIBLE_FIELD_COUNT>( std::make_index_sequence<MAX_POSSIBLE_FIELD_COUNT/2>() ).count;
         };
+
+        template<class Pod> struct GetFieldCountRecursive {
+        private:
+            template<class T, bool isScalar = std::is_scalar<T>::value> struct Selector {};
+            template<class T> struct Selector<T,true> {
+                static constexpr size_t advancedArg(size_t cnt) { return cnt + 1; }
+            };
+            template<class T> struct Selector<T,false> {
+                static constexpr size_t advancedArg(size_t cnt) { return cnt + getFieldCountRecursive<T>(); }
+            };
+            struct Typer {
+                size_t *cnt, _;
+                template<class T> constexpr operator T () { *cnt = Selector<T>::advancedArg(*cnt); return T{}; }
+            };
+            template<size_t...Is> static constexpr size_t cnt(std::index_sequence<Is...>) {
+                size_t N = 0;
+                Pod _{ Typer{&N,Is}... };
+                return N;
+            }
+        public:
+            static constexpr size_t value = cnt( std::make_index_sequence< getFieldCount<Pod>() >() );
+        };
     }} // details // StructFields
 
     template<class T> inline constexpr size_t getFieldCount() {
         return details::StructFields::GetFieldCount<T>::value;
+    }
+    template<class T> inline constexpr size_t getFieldCountRecursive() {
+        return details::StructFields::GetFieldCountRecursive<T>::value;
     }
 } // _utl
