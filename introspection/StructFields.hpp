@@ -133,6 +133,74 @@ namespace _utl
         public:
             static constexpr size_t value = cnt( std::make_index_sequence< getFieldCount<Pod>() >() );
         };
+
+        struct FieldsMapItem
+        {
+            TypeSig::Id type;
+            uint32_t offset;
+        };
+        template<class Pod> struct GetFieldsMap {
+        private:
+            template<class T, bool isScalar = std::is_scalar<T>::value> struct Selector {};
+            template<class T> struct Selector<T,true>
+            {
+                static constexpr void setMapItem(FieldsMapItem *& it, uint32_t &offset, uint32_t &maxAlignment)
+                {
+                    it->offset = (sizeof(T) - 1 + offset) / sizeof(T) * sizeof(T);
+                    it->type = TypeSig::type_id<T>();
+
+                    offset = it->offset + sizeof(T);
+                    maxAlignment = (sizeof(T) > maxAlignment) ? sizeof(T) : maxAlignment;
+
+                    it += 1;
+                }
+            };
+            template<class T> struct Selector<T,false>
+            {
+                static constexpr void setMapItem(FieldsMapItem *& it, uint32_t &offset, uint32_t &maxAlignment)
+                {
+                    // look ahead and get nested POD alignment
+                    uint32_t nestedPodAlignment = 0;
+                    uint32_t ignoredOffset = 0;
+                    GetFieldsMap<T>::map(it, ignoredOffset, nestedPodAlignment);
+
+                    // take in account this alignment (POD as a whole is aligned as its biggest field)
+                    maxAlignment = std::max(nestedPodAlignment, maxAlignment);
+
+                    // go on and save items into the map
+                    it = GetFieldsMap<T>::map(it, offset, maxAlignment);
+                }
+            };
+            struct Typer {
+                FieldsMapItem *& it;
+                uint32_t &ofs;
+                uint32_t &alg;
+                size_t _;
+                template<class T> constexpr operator T () { Selector<T>::setMapItem(it, ofs, alg); return T{}; }
+            };
+            template<size_t...Is> static constexpr FieldsMapItem * map(FieldsMapItem *& map_, uint32_t &offset, uint32_t &maxAlignment, std::index_sequence<Is...>)
+            {
+                Pod _{ Typer{map_,offset,maxAlignment,Is}... };
+                return map_;
+            }
+        public:
+            static constexpr FieldsMapItem * map(FieldsMapItem * map_, uint32_t &offset, uint32_t &maxAlignment) {
+                return map(
+                    map_, offset, maxAlignment, std::make_index_sequence< getFieldCount<Pod>() >()
+                );
+            }
+        };
+        template<class Pod> struct FieldsMapHelper
+        {
+            static FieldsMapItem MAP[sizeof(Pod) * 8];
+            static const FieldsMapItem *m_begin, *m_end;
+            static uint32_t _x, _xx;
+        };
+        template<class Pod> FieldsMapItem FieldsMapHelper<Pod>::MAP[sizeof(Pod) * 8] = {0};
+        template<class Pod> uint32_t FieldsMapHelper<Pod>::_x = 0;
+        template<class Pod> uint32_t FieldsMapHelper<Pod>::_xx = 0;
+        template<class Pod> const FieldsMapItem *FieldsMapHelper<Pod>::m_begin = FieldsMapHelper<Pod>::MAP;
+        template<class Pod> const FieldsMapItem *FieldsMapHelper<Pod>::m_end = GetFieldsMap<Pod>::map(FieldsMapHelper<Pod>::MAP, FieldsMapHelper<Pod>::_x, FieldsMapHelper<Pod>::_xx);
     }} // details // StructFields
 
     template<class T> inline constexpr size_t getFieldCount() {
@@ -141,4 +209,13 @@ namespace _utl
     template<class T> inline constexpr size_t getFieldCountRecursive() {
         return details::StructFields::GetFieldCountRecursive<T>::value;
     }
+    template<class Pod> struct StructFieldsMap {
+    private:
+        static constexpr details::StructFields::FieldsMapHelper<Pod> compileTime = details::StructFields::FieldsMapHelper<Pod>{};
+    public:
+        using FieldsMapItem = details::StructFields::FieldsMapItem;
+        constexpr inline const FieldsMapItem *begin() const { return compileTime.m_begin; }
+        constexpr inline const FieldsMapItem *end()   const { return compileTime.m_end;   }
+    };
+
 } // _utl
