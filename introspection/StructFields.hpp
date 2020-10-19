@@ -42,6 +42,34 @@ namespace _utl
         template<class T> inline constexpr Id type_id(Tag<typename std::enable_if<std::is_polymorphic<T>::value,T>::type>) { return 'P'; }
 
         template<class T> inline constexpr Id type_id() { return type_id(Tag<T>{}); }
+
+        std::string to_string(Id id)
+        {
+            std::string result;
+            switch (id & 0xFF) {
+                case TypeSig::type_id<       void>(): result.append(       "void"); break;
+                case TypeSig::type_id<       char>(): result.append(       "char"); break;
+                case TypeSig::type_id<   char16_t>(): result.append(   "char16_t"); break;
+                case TypeSig::type_id<   char32_t>(): result.append(   "char32_t"); break;
+                case TypeSig::type_id<      float>(): result.append(      "float"); break;
+                case TypeSig::type_id<     double>(): result.append(     "double"); break;
+                case TypeSig::type_id<long double>(): result.append("long double"); break;
+                case TypeSig::type_id<    uint8_t>(): result.append(    "uint8_t"); break;
+                case TypeSig::type_id<     int8_t>(): result.append(     "int8_t"); break;
+                case TypeSig::type_id<   uint16_t>(): result.append(   "uint16_t"); break;
+                case TypeSig::type_id<    int16_t>(): result.append(    "int16_t"); break;
+                case TypeSig::type_id<   uint32_t>(): result.append(   "uint32_t"); break;
+                case TypeSig::type_id<    int32_t>(): result.append(    "int32_t"); break;
+                case TypeSig::type_id<   uint64_t>(): result.append(   "uint64_t"); break;
+                case TypeSig::type_id<    int64_t>(): result.append(    "int64_t"); break;
+                default: result.append("?"); break;
+            }
+            if (id > 0xFF) {
+                size_t N = (id >> 8);
+                for (size_t i = 0; i < N; ++i) { result.append("*"); }
+            }
+            return result;
+        }
     };
 
     namespace details { namespace StructFields
