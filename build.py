@@ -73,7 +73,7 @@ except Exception as exc:
 
 print("=" * 80)
 # add basic options
-options = [ "g++", "-m64", "-o", os.path.join(ResultDir,TargetName), "-x", "c++", "-g", "-std=c++14", "-pipe", "-pthread", "-B", "/usr/local/include", "-Wall", "-Wextra" ]
+options = [ "g++", "-m64", "-o", os.path.join(ResultDir,TargetName), "-x", "c++", "-g", "-std=c++14", "-pedantic", "-pipe", "-pthread", "-B", "/usr/local/include", "-Wall", "-Wextra" ]
 # add include dir paths
 for path in IncludeDirsCommaList: options += [ "-I%s"%path ]
 # add source files *
