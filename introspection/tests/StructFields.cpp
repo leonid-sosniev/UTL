@@ -1,6 +1,14 @@
 #define CATCH_CONFIG_MAIN
 #include <utl/Catch2/single_include/catch2/catch.hpp>
 #include <utl/introspection/StructFields.hpp>
+#include <sstream>
+
+struct Visitor {
+    std::stringstream str;
+    template<class T> void process(const T & v) {
+        str << v << ' ';
+    }
+};
 
 TEST_CASE("get number of fields in struct", "introspection")
 {
@@ -67,4 +75,9 @@ TEST_CASE("get number of fields in struct", "introspection")
     REQUIRE(  (fmIter+0x8)->offset == ((char*)&f.y.d  - (char*)&f)  );
     REQUIRE(  (fmIter+0x9)->offset == ((char*)&f.y._4 - (char*)&f)  );
     REQUIRE(  (fmIter+0xA)->offset == ((char*)&f.y._5 - (char*)&f)  );
+
+    f = { '?', 0.5, 1234, -1, "literal", '@', 'b', '$', 5.12, '!', '`' };
+    Visitor V;
+    _utl::processStructFields(V, f);
+    REQUIRE(V.str.str() == "? 0.5 1234 -1 literal @ b $ 5.12 ! ` ");
 }
