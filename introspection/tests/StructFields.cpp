@@ -45,23 +45,23 @@ TEST_CASE("get number of fields in struct", "introspection")
         YYYYY y;
     };
 
-    constexpr size_t numS = _utl::getFieldCount<S>();
-    constexpr size_t numM = _utl::getFieldCount<M>();
-    constexpr size_t numD = _utl::getFieldCount<D>();
+    constexpr size_t numS = _utl::PodIntrospection::getFieldCount<S>();
+    constexpr size_t numM = _utl::PodIntrospection::getFieldCount<M>();
+    constexpr size_t numD = _utl::PodIntrospection::getFieldCount<D>();
 
     REQUIRE(numS == 3);
     REQUIRE(numM == 3);
     REQUIRE(numD == 4);
 
-    constexpr size_t recS = _utl::getFieldCountRecursive<S>();
-    constexpr size_t recM = _utl::getFieldCountRecursive<M>();
-    constexpr size_t recD = _utl::getFieldCountRecursive<D>();
+    constexpr size_t recS = _utl::PodIntrospection::getFieldCountRecursive<S>();
+    constexpr size_t recM = _utl::PodIntrospection::getFieldCountRecursive<M>();
+    constexpr size_t recD = _utl::PodIntrospection::getFieldCountRecursive<D>();
 
     REQUIRE(recS == 3);
     REQUIRE(recM == 5);
     REQUIRE(recD == 10);
 
-    constexpr auto FM = _utl::StructFieldsMap<XXXXX>{};
+    constexpr auto FM = _utl::PodIntrospection::StructFieldsMap<XXXXX>{};
     auto fmIter = FM.begin();
     XXXXX f;
     REQUIRE(  (fmIter+0x0)->offset == ((char*)&f.c    - (char*)&f)  );
@@ -78,6 +78,6 @@ TEST_CASE("get number of fields in struct", "introspection")
 
     f = { '?', 0.5, 1234, -1, "literal", '@', 'b', '$', 5.12, '!', '`' };
     Visitor V;
-    _utl::processStructFields(V, f);
+    _utl::PodIntrospection::processStructFields(V, f);
     REQUIRE(V.str.str() == "? 0.5 1234 -1 literal @ b $ 5.12 ! ` ");
 }

@@ -5,9 +5,6 @@
 
 namespace _utl
 {
-    template<class T> inline constexpr size_t getFieldCount();
-    template<class T> inline constexpr size_t getFieldCountRecursive();
-
     namespace TypeSig
     {
         template<class T> struct Tag {};
@@ -74,6 +71,9 @@ namespace _utl
 
     namespace details { namespace StructFields
     {
+        template<class T> inline constexpr size_t getFieldCount();
+        template<class T> inline constexpr size_t getFieldCountRecursive();
+
         template<class Pod> struct GetFieldCount {
         private:
             static constexpr const size_t MAX_POSSIBLE_FIELD_COUNT = sizeof(Pod)*8;
@@ -133,6 +133,13 @@ namespace _utl
         public:
             static constexpr size_t value = cnt( std::make_index_sequence< getFieldCount<Pod>() >() );
         };
+
+        template<class T> inline constexpr size_t getFieldCount() {
+            return details::StructFields::GetFieldCount<T>::value;
+        }
+        template<class T> inline constexpr size_t getFieldCountRecursive() {
+            return details::StructFields::GetFieldCountRecursive<T>::value;
+        }
 
         struct FieldsMapItem
         {
@@ -218,45 +225,48 @@ namespace _utl
         }
     }} // details // StructFields
 
-    template<class T> inline constexpr size_t getFieldCount() {
-        return details::StructFields::GetFieldCount<T>::value;
-    }
-    template<class T> inline constexpr size_t getFieldCountRecursive() {
-        return details::StructFields::GetFieldCountRecursive<T>::value;
-    }
-    template<class Pod> struct StructFieldsMap {
-    private:
-        static constexpr details::StructFields::FieldsMapHelper<Pod> compileTime = details::StructFields::FieldsMapHelper<Pod>{};
-    public:
-        using FieldsMapItem = details::StructFields::FieldsMapItem;
-        constexpr inline const FieldsMapItem *begin() const { return compileTime.m_begin; }
-        constexpr inline const FieldsMapItem *end()   const { return compileTime.m_end;   }
-    };
-
-    template<class Visitor, class Pod> void processStructFields(Visitor & visitor, const Pod & pod)
+    struct PodIntrospection
     {
-        static constexpr StructFieldsMap<Pod> podMap{};
-        for (auto &it : podMap)
+        template<class T> static inline constexpr size_t getFieldCount() {
+            return details::StructFields::getFieldCount<T>();
+        }
+        template<class T> static inline constexpr size_t getFieldCountRecursive() {
+            return details::StructFields::getFieldCountRecursive<T>();
+        }
+        template<class Pod> struct StructFieldsMap {
+        private:
+            static constexpr details::StructFields::FieldsMapHelper<Pod> compileTime = details::StructFields::FieldsMapHelper<Pod>{};
+        public:
+            using FieldsMapItem = details::StructFields::FieldsMapItem;
+            constexpr inline const FieldsMapItem *begin() const { return compileTime.m_begin; }
+            constexpr inline const FieldsMapItem *end()   const { return compileTime.m_end;   }
+        };
+
+        template<class Visitor, class Pod> static inline void processStructFields(Visitor & visitor, const Pod & pod)
         {
-            switch (it.type & 0xFF)
+            static constexpr StructFieldsMap<Pod> podMap{};
+            for (auto &it : podMap)
             {
-                case _utl::TypeSig::type_id<       char>():  details::StructFields::processSingleStructField<       char>(&pod, it, visitor); break;
-                case _utl::TypeSig::type_id<   char16_t>():  details::StructFields::processSingleStructField<   char16_t>(&pod, it, visitor); break;
-                case _utl::TypeSig::type_id<   char32_t>():  details::StructFields::processSingleStructField<   char32_t>(&pod, it, visitor); break;
-                case _utl::TypeSig::type_id<      float>():  details::StructFields::processSingleStructField<      float>(&pod, it, visitor); break;
-                case _utl::TypeSig::type_id<     double>():  details::StructFields::processSingleStructField<     double>(&pod, it, visitor); break;
-                case _utl::TypeSig::type_id<long double>():  details::StructFields::processSingleStructField<long double>(&pod, it, visitor); break;
-                case _utl::TypeSig::type_id<    uint8_t>():  details::StructFields::processSingleStructField<    uint8_t>(&pod, it, visitor); break;
-                case _utl::TypeSig::type_id<     int8_t>():  details::StructFields::processSingleStructField<     int8_t>(&pod, it, visitor); break;
-                case _utl::TypeSig::type_id<   uint16_t>():  details::StructFields::processSingleStructField<   uint16_t>(&pod, it, visitor); break;
-                case _utl::TypeSig::type_id<    int16_t>():  details::StructFields::processSingleStructField<    int16_t>(&pod, it, visitor); break;
-                case _utl::TypeSig::type_id<   uint32_t>():  details::StructFields::processSingleStructField<   uint32_t>(&pod, it, visitor); break;
-                case _utl::TypeSig::type_id<    int32_t>():  details::StructFields::processSingleStructField<    int32_t>(&pod, it, visitor); break;
-                case _utl::TypeSig::type_id<   uint64_t>():  details::StructFields::processSingleStructField<   uint64_t>(&pod, it, visitor); break;
-                case _utl::TypeSig::type_id<    int64_t>():  details::StructFields::processSingleStructField<    int64_t>(&pod, it, visitor); break;
-                default: std::abort(); break;
+                switch (it.type & 0xFF)
+                {
+                    case _utl::TypeSig::type_id<       char>():  details::StructFields::processSingleStructField<       char>(&pod, it, visitor); break;
+                    case _utl::TypeSig::type_id<   char16_t>():  details::StructFields::processSingleStructField<   char16_t>(&pod, it, visitor); break;
+                    case _utl::TypeSig::type_id<   char32_t>():  details::StructFields::processSingleStructField<   char32_t>(&pod, it, visitor); break;
+                    case _utl::TypeSig::type_id<      float>():  details::StructFields::processSingleStructField<      float>(&pod, it, visitor); break;
+                    case _utl::TypeSig::type_id<     double>():  details::StructFields::processSingleStructField<     double>(&pod, it, visitor); break;
+                    case _utl::TypeSig::type_id<long double>():  details::StructFields::processSingleStructField<long double>(&pod, it, visitor); break;
+                    case _utl::TypeSig::type_id<    uint8_t>():  details::StructFields::processSingleStructField<    uint8_t>(&pod, it, visitor); break;
+                    case _utl::TypeSig::type_id<     int8_t>():  details::StructFields::processSingleStructField<     int8_t>(&pod, it, visitor); break;
+                    case _utl::TypeSig::type_id<   uint16_t>():  details::StructFields::processSingleStructField<   uint16_t>(&pod, it, visitor); break;
+                    case _utl::TypeSig::type_id<    int16_t>():  details::StructFields::processSingleStructField<    int16_t>(&pod, it, visitor); break;
+                    case _utl::TypeSig::type_id<   uint32_t>():  details::StructFields::processSingleStructField<   uint32_t>(&pod, it, visitor); break;
+                    case _utl::TypeSig::type_id<    int32_t>():  details::StructFields::processSingleStructField<    int32_t>(&pod, it, visitor); break;
+                    case _utl::TypeSig::type_id<   uint64_t>():  details::StructFields::processSingleStructField<   uint64_t>(&pod, it, visitor); break;
+                    case _utl::TypeSig::type_id<    int64_t>():  details::StructFields::processSingleStructField<    int64_t>(&pod, it, visitor); break;
+                    default: std::abort(); break;
+                }
             }
         }
-    }
+    };
 
 } // _utl
