@@ -201,6 +201,21 @@ namespace _utl
         template<class Pod> uint32_t FieldsMapHelper<Pod>::_xx = 0;
         template<class Pod> const FieldsMapItem *FieldsMapHelper<Pod>::m_begin = FieldsMapHelper<Pod>::MAP;
         template<class Pod> const FieldsMapItem *FieldsMapHelper<Pod>::m_end = GetFieldsMap<Pod>::map(FieldsMapHelper<Pod>::MAP, FieldsMapHelper<Pod>::_x, FieldsMapHelper<Pod>::_xx);
+
+        template<class T, class Visitor> inline void processSingleStructField(const void * pod, const details::StructFields::FieldsMapItem & it, Visitor & visitor)
+        {
+            using Byte = enum : uint8_t {};
+            static_assert(std::is_unsigned<decltype(it.type)>::value, "Pointer level must be unsigned value. Correct processStructFields().");
+
+            auto ptrLvl = it.type >> 8;
+            if (!ptrLvl) {
+                visitor.process(*reinterpret_cast<T            const *>(reinterpret_cast<const Byte *>(pod) + it.offset)  );
+            } else if (ptrLvl == 1) {
+                visitor.process(*reinterpret_cast<T    const * const *>(reinterpret_cast<const Byte *>(pod) + it.offset)  );
+            } else {
+                visitor.process(*reinterpret_cast<void const * const *>(reinterpret_cast<const Byte *>(pod) + it.offset)  );
+            }
+        }
     }} // details // StructFields
 
     template<class T> inline constexpr size_t getFieldCount() {
@@ -217,5 +232,31 @@ namespace _utl
         constexpr inline const FieldsMapItem *begin() const { return compileTime.m_begin; }
         constexpr inline const FieldsMapItem *end()   const { return compileTime.m_end;   }
     };
+
+    template<class Visitor, class Pod> void processStructFields(Visitor & visitor, const Pod & pod)
+    {
+        static constexpr StructFieldsMap<Pod> podMap{};
+        for (auto &it : podMap)
+        {
+            switch (it.type & 0xFF)
+            {
+                case _utl::TypeSig::type_id<       char>():  details::StructFields::processSingleStructField<       char>(&pod, it, visitor); break;
+                case _utl::TypeSig::type_id<   char16_t>():  details::StructFields::processSingleStructField<   char16_t>(&pod, it, visitor); break;
+                case _utl::TypeSig::type_id<   char32_t>():  details::StructFields::processSingleStructField<   char32_t>(&pod, it, visitor); break;
+                case _utl::TypeSig::type_id<      float>():  details::StructFields::processSingleStructField<      float>(&pod, it, visitor); break;
+                case _utl::TypeSig::type_id<     double>():  details::StructFields::processSingleStructField<     double>(&pod, it, visitor); break;
+                case _utl::TypeSig::type_id<long double>():  details::StructFields::processSingleStructField<long double>(&pod, it, visitor); break;
+                case _utl::TypeSig::type_id<    uint8_t>():  details::StructFields::processSingleStructField<    uint8_t>(&pod, it, visitor); break;
+                case _utl::TypeSig::type_id<     int8_t>():  details::StructFields::processSingleStructField<     int8_t>(&pod, it, visitor); break;
+                case _utl::TypeSig::type_id<   uint16_t>():  details::StructFields::processSingleStructField<   uint16_t>(&pod, it, visitor); break;
+                case _utl::TypeSig::type_id<    int16_t>():  details::StructFields::processSingleStructField<    int16_t>(&pod, it, visitor); break;
+                case _utl::TypeSig::type_id<   uint32_t>():  details::StructFields::processSingleStructField<   uint32_t>(&pod, it, visitor); break;
+                case _utl::TypeSig::type_id<    int32_t>():  details::StructFields::processSingleStructField<    int32_t>(&pod, it, visitor); break;
+                case _utl::TypeSig::type_id<   uint64_t>():  details::StructFields::processSingleStructField<   uint64_t>(&pod, it, visitor); break;
+                case _utl::TypeSig::type_id<    int64_t>():  details::StructFields::processSingleStructField<    int64_t>(&pod, it, visitor); break;
+                default: std::abort(); break;
+            }
+        }
+    }
 
 } // _utl
