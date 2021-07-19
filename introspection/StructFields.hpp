@@ -1,64 +1,98 @@
 #pragma once
 
 #include <cstddef> // size_t
+#include <cstdint>
+#include <string>
 #include <type_traits> // enable_if...
+
+#undef max
 
 namespace _utl
 {
     namespace TypeSig
     {
-        template<class T> struct Tag {};
         using Id = uint16_t;
+        inline constexpr Id method_type_id()    { return 'M'; }
+        inline constexpr Id function_type_id()  { return 'F'; }
+        inline constexpr Id union_type_id()     { return 'U'; }
+        inline constexpr Id enum_type_id()      { return 'E'; }
+        inline constexpr Id class_type_id()     { return 'C'; }
+        inline constexpr Id polymorph_type_id() { return 'P'; }
+        template<class T> class Tag {
+        private:
+            template<class U> static constexpr typename std::enable_if<std::is_union<U>::value, Id>::type
+            getId(const U &&) {
+                return TypeSig::union_type_id();
+            }
+            template<class U> static constexpr typename std::enable_if<std::is_enum<U>::value, Id>::type
+            getId(const U &&) {
+                return TypeSig::enum_type_id();
+            }
+            template<class U> static constexpr typename std::enable_if<std::is_class<U>::value && !std::is_enum<T>::value, Id>::type
+            getId(const U &&) {
+                return TypeSig::class_type_id();
+            }
+            template<class U> static constexpr typename std::enable_if<std::is_polymorphic<U>::value, Id>::type
+            getId(const U &&) {
+                return TypeSig::polymorph_type_id();
+            }
+        public:
+            static constexpr Id id = getId(T{});
+        };
+        template<> struct Tag<       void> { static constexpr Id id = 'V'; };
+        template<> struct Tag<       char> { static constexpr Id id = 'c'; };
+        template<> struct Tag<   char16_t> { static constexpr Id id = 'w'; };
+        template<> struct Tag<   char32_t> { static constexpr Id id = 'u'; };
+        template<> struct Tag<      float> { static constexpr Id id = 'f'; };
+        template<> struct Tag<     double> { static constexpr Id id = 'd'; };
+        template<> struct Tag<long double> { static constexpr Id id = 'x'; };
+        template<> struct Tag<    uint8_t> { static constexpr Id id = 'B'; };
+        template<> struct Tag<     int8_t> { static constexpr Id id = 'b'; };
+        template<> struct Tag<   uint16_t> { static constexpr Id id = 'H'; };
+        template<> struct Tag<    int16_t> { static constexpr Id id = 'h'; };
+        template<> struct Tag<   uint32_t> { static constexpr Id id = 'I'; };
+        template<> struct Tag<    int32_t> { static constexpr Id id = 'i'; };
+        template<> struct Tag<   uint64_t> { static constexpr Id id = 'L'; };
+        template<> struct Tag<    int64_t> { static constexpr Id id = 'l'; };
+        template<class T> struct Tag<const T>    { static constexpr Id id = Tag<T>::id; };
+        template<class T> struct Tag<volatile T> { static constexpr Id id = Tag<T>::id; };
+        template<class T> struct Tag<T&>         { static constexpr Id id = Tag<T*>::id; };
+        template<class T> struct Tag<T*>         { static constexpr Id id = Tag<T>::id + 0x100; };
 
-        inline constexpr Id type_id(Tag<       void>) { return 'V'; }
-        inline constexpr Id type_id(Tag<       char>) { return 'c'; }
-        inline constexpr Id type_id(Tag<   char16_t>) { return 'w'; }
-        inline constexpr Id type_id(Tag<   char32_t>) { return 'u'; }
-        inline constexpr Id type_id(Tag<      float>) { return 'f'; }
-        inline constexpr Id type_id(Tag<     double>) { return 'd'; }
-        inline constexpr Id type_id(Tag<long double>) { return 'x'; }
-        inline constexpr Id type_id(Tag<    uint8_t>) { return 'B'; }
-        inline constexpr Id type_id(Tag<     int8_t>) { return 'b'; }
-        inline constexpr Id type_id(Tag<   uint16_t>) { return 'H'; }
-        inline constexpr Id type_id(Tag<    int16_t>) { return 'h'; }
-        inline constexpr Id type_id(Tag<   uint32_t>) { return 'I'; }
-        inline constexpr Id type_id(Tag<    int32_t>) { return 'i'; }
-        inline constexpr Id type_id(Tag<   uint64_t>) { return 'L'; }
-        inline constexpr Id type_id(Tag<    int64_t>) { return 'l'; }
-        template<class T> inline constexpr Id type_id(Tag<T>) { return '?'; }
+        template<class Obj, class Ret, class...Args> struct Tag<Ret(Obj::*)(Args...)> {
+            static constexpr Id id = method_type_id();
+        };
+        template<class Ret, class...Args> struct Tag<Ret(*)(Args...)> {
+            static constexpr Id id = function_type_id();
+        };
 
-        template<class T> inline constexpr Id type_id(Tag<const T>   ) { return type_id(Tag<T>{}); }
-        template<class T> inline constexpr Id type_id(Tag<volatile T>) { return type_id(Tag<T>{}); }
-        template<class T> inline constexpr Id type_id(Tag<T&>        ) { return type_id(Tag<T*>{}); }
-        template<class T> inline constexpr Id type_id(Tag<T*>        ) { return type_id(Tag<T>{}) + 0x100; }
+        template<class T> inline constexpr Id type_id() { return Tag<T>::id; }
 
-        template<class Obj, class Ret, class...Args> inline constexpr Id type_id(Tag<Ret(Obj::*)(Args...)>) { return 'M'; }
-        template<class Ret, class...Args>            inline constexpr Id type_id(Tag<Ret(*)(Args...)>     ) { return 'F'; }
-        template<class T> inline constexpr Id type_id(Tag<typename std::enable_if<std::is_union<T>::value      ,T>::type>) { return 'U'; }
-        template<class T> inline constexpr Id type_id(Tag<typename std::enable_if<std::is_enum<T>::value       ,T>::type>) { return 'E'; }
-        template<class T> inline constexpr Id type_id(Tag<typename std::enable_if<std::is_polymorphic<T>::value,T>::type>) { return 'P'; }
-
-        template<class T> inline constexpr Id type_id() { return type_id(Tag<T>{}); }
-
-        std::string to_string(Id id)
+        inline std::string to_string(Id id)
         {
             std::string result;
             switch (id & 0xFF) {
-                case TypeSig::type_id<       void>(): result.append(       "void"); break;
-                case TypeSig::type_id<       char>(): result.append(       "char"); break;
-                case TypeSig::type_id<   char16_t>(): result.append(   "char16_t"); break;
-                case TypeSig::type_id<   char32_t>(): result.append(   "char32_t"); break;
-                case TypeSig::type_id<      float>(): result.append(      "float"); break;
-                case TypeSig::type_id<     double>(): result.append(     "double"); break;
-                case TypeSig::type_id<long double>(): result.append("long double"); break;
-                case TypeSig::type_id<    uint8_t>(): result.append(    "uint8_t"); break;
-                case TypeSig::type_id<     int8_t>(): result.append(     "int8_t"); break;
-                case TypeSig::type_id<   uint16_t>(): result.append(   "uint16_t"); break;
-                case TypeSig::type_id<    int16_t>(): result.append(    "int16_t"); break;
-                case TypeSig::type_id<   uint32_t>(): result.append(   "uint32_t"); break;
-                case TypeSig::type_id<    int32_t>(): result.append(    "int32_t"); break;
-                case TypeSig::type_id<   uint64_t>(): result.append(   "uint64_t"); break;
-                case TypeSig::type_id<    int64_t>(): result.append(    "int64_t"); break;
+                case TypeSig::Tag<       void>::id: result.append(       "void"); break;
+                case TypeSig::Tag<       char>::id: result.append(       "char"); break;
+                case TypeSig::Tag<   char16_t>::id: result.append(   "char16_t"); break;
+                case TypeSig::Tag<   char32_t>::id: result.append(   "char32_t"); break;
+                case TypeSig::Tag<      float>::id: result.append(      "float"); break;
+                case TypeSig::Tag<     double>::id: result.append(     "double"); break;
+                case TypeSig::Tag<long double>::id: result.append("long double"); break;
+                case TypeSig::Tag<    uint8_t>::id: result.append(    "uint8_t"); break;
+                case TypeSig::Tag<     int8_t>::id: result.append(     "int8_t"); break;
+                case TypeSig::Tag<   uint16_t>::id: result.append(   "uint16_t"); break;
+                case TypeSig::Tag<    int16_t>::id: result.append(    "int16_t"); break;
+                case TypeSig::Tag<   uint32_t>::id: result.append(   "uint32_t"); break;
+                case TypeSig::Tag<    int32_t>::id: result.append(    "int32_t"); break;
+                case TypeSig::Tag<   uint64_t>::id: result.append(   "uint64_t"); break;
+                case TypeSig::Tag<    int64_t>::id: result.append(    "int64_t"); break;
+                case TypeSig::method_type_id   ():    result.append(     "method"); break;
+                case TypeSig::function_type_id ():    result.append(   "function"); break;
+                case TypeSig::union_type_id    ():    result.append(      "union"); break;
+                case TypeSig::enum_type_id     ():    result.append(       "enum"); break;
+                case TypeSig::class_type_id    ():    result.append(      "class"); break;
+                case TypeSig::polymorph_type_id():    result.append(  "polymorph"); break;
                 default: result.append("?"); break;
             }
             if (id > 0xFF) {
@@ -67,7 +101,8 @@ namespace _utl
             }
             return result;
         }
-    };
+        
+    }
 
     namespace details { namespace StructFields
     {
@@ -82,7 +117,8 @@ namespace _utl
                 template<class T> constexpr operator T () { return T{}; }
             };
             template<class T> struct Result {
-                size_t count;
+                const size_t count;
+                constexpr Result(const size_t count_) : count(count_) {}
             };
             template<size_t SearchRegion_Min, size_t SearchRegion_Max, size_t I, size_t...Is>
             static constexpr
@@ -141,41 +177,49 @@ namespace _utl
             return details::StructFields::GetFieldCountRecursive<T>::value;
         }
 
+        template<class T> struct is_struct {
+            static constexpr bool value = std::is_class<T>::value && std::is_trivially_copyable<T>::value;
+        };
+
         struct FieldsMapItem
         {
             TypeSig::Id type;
             uint32_t offset;
         };
-        template<class Pod> struct GetFieldsMap {
+        template<class Pod> struct Mapper {
         private:
-            template<class T, bool isScalar = std::is_scalar<T>::value> struct Selector {};
-            template<class T> struct Selector<T,true>
-            {
-                static constexpr void setMapItem(FieldsMapItem *& it, uint32_t &offset, uint32_t &maxAlignment)
-                {
-                    it->offset = (sizeof(T) - 1 + offset) / sizeof(T) * sizeof(T);
-                    it->type = TypeSig::type_id<T>();
-
-                    offset = it->offset + sizeof(T);
-                    maxAlignment = (sizeof(T) > maxAlignment) ? sizeof(T) : maxAlignment;
-
-                    it += 1;
-                }
-            };
+            template<class T, bool isStruct = is_struct<T>::value> struct Selector {};
             template<class T> struct Selector<T,false>
             {
-                static constexpr void setMapItem(FieldsMapItem *& it, uint32_t &offset, uint32_t &maxAlignment)
+                static constexpr void detectStructOrOpaque(FieldsMapItem *& item, uint32_t &basicOffset, uint32_t &maxAlignment)
                 {
+                    // get info on current field
+                    item->type = TypeSig::Tag<T>::id;
+                    item->offset = (basicOffset + sizeof(T) - 1) / sizeof(T) * sizeof(T); // apply alignment
+
+                    // prepare basic data for the next field
+                    basicOffset = item->offset + sizeof(T);
+                    maxAlignment = (sizeof(T) > maxAlignment) ? sizeof(T) : maxAlignment;
+                    item += 1;
+                }
+            };
+            template<class T> struct Selector<T,true>
+            {
+                static constexpr void detectStructOrOpaque(FieldsMapItem *& it, uint32_t &basicOffset, uint32_t &maxAlignment)
+                {
+                    static_assert(std::is_default_constructible<Pod>::value,
+                        "PodIntrospection::processStructFields(): given Pod type is not default constructible!");
                     // look ahead and get nested POD alignment
                     uint32_t nestedPodAlignment = 0;
                     uint32_t ignoredOffset = 0;
-                    GetFieldsMap<T>::map(it, ignoredOffset, nestedPodAlignment);
+                    Mapper<T>::getFullMap(it, ignoredOffset, nestedPodAlignment);
 
                     // take in account this alignment (POD as a whole is aligned as its biggest field)
                     maxAlignment = std::max(nestedPodAlignment, maxAlignment);
 
                     // go on and save items into the map
-                    it = GetFieldsMap<T>::map(it, offset, maxAlignment);
+                    it = Mapper<T>::getFullMap(it, basicOffset, maxAlignment);
+                    basicOffset = (basicOffset + maxAlignment - 1) / maxAlignment * maxAlignment;
                 }
             };
             struct Typer {
@@ -183,15 +227,15 @@ namespace _utl
                 uint32_t &ofs;
                 uint32_t &alg;
                 size_t _;
-                template<class T> constexpr operator T () { Selector<T>::setMapItem(it, ofs, alg); return T{}; }
+                template<class T> constexpr operator T () { Selector<T>::detectStructOrOpaque(it, ofs, alg); return T{}; }
             };
-            template<size_t...Is> static constexpr FieldsMapItem * map(FieldsMapItem *& map_, uint32_t &offset, uint32_t &maxAlignment, std::index_sequence<Is...>)
+            template<size_t...Is> static constexpr FieldsMapItem * map(FieldsMapItem *& mapItemsCursor, uint32_t &currentOffset, uint32_t &maxAlignment, std::index_sequence<Is...>)
             {
-                Pod _{ Typer{map_,offset,maxAlignment,Is}... };
-                return map_;
+                Pod _{ Typer{mapItemsCursor,currentOffset,maxAlignment,Is}... };
+                return mapItemsCursor;
             }
         public:
-            static constexpr FieldsMapItem * map(FieldsMapItem * map_, uint32_t &offset, uint32_t &maxAlignment) {
+            static constexpr FieldsMapItem * getFullMap(FieldsMapItem * map_, uint32_t &offset, uint32_t &maxAlignment) {
                 return map(
                     map_, offset, maxAlignment, std::make_index_sequence< getFieldCount<Pod>() >()
                 );
@@ -207,20 +251,34 @@ namespace _utl
         template<class Pod> uint32_t FieldsMapHelper<Pod>::_x = 0;
         template<class Pod> uint32_t FieldsMapHelper<Pod>::_xx = 0;
         template<class Pod> const FieldsMapItem *FieldsMapHelper<Pod>::m_begin = FieldsMapHelper<Pod>::MAP;
-        template<class Pod> const FieldsMapItem *FieldsMapHelper<Pod>::m_end = GetFieldsMap<Pod>::map(FieldsMapHelper<Pod>::MAP, FieldsMapHelper<Pod>::_x, FieldsMapHelper<Pod>::_xx);
+        template<class Pod> const FieldsMapItem *FieldsMapHelper<Pod>::m_end = Mapper<Pod>::getFullMap(FieldsMapHelper<Pod>::MAP, FieldsMapHelper<Pod>::_x, FieldsMapHelper<Pod>::_xx);
 
-        template<class T, class Visitor> inline void processSingleStructField(const void * pod, const details::StructFields::FieldsMapItem & it, Visitor & visitor)
+        template<class T, class Visitor> inline void processSingleStructField(void * pod, const details::StructFields::FieldsMapItem & it, Visitor & visitor)
         {
             using Byte = enum : uint8_t {};
             static_assert(std::is_unsigned<decltype(it.type)>::value, "Pointer level must be unsigned value. Correct processStructFields().");
-
+            
             auto ptrLvl = it.type >> 8;
             if (!ptrLvl) {
-                visitor.process(*reinterpret_cast<T            const *>(reinterpret_cast<const Byte *>(pod) + it.offset)  );
-            } else if (ptrLvl == 1) {
-                visitor.process(*reinterpret_cast<T    const * const *>(reinterpret_cast<const Byte *>(pod) + it.offset)  );
+                visitor.process(*reinterpret_cast<T     * const>(reinterpret_cast<Byte *>(pod) + it.offset));
+            } else if (ptrLvl ==1) {
+                visitor.process(*reinterpret_cast<T    ** const>(reinterpret_cast<Byte *>(pod) + it.offset));
             } else {
-                visitor.process(*reinterpret_cast<void const * const *>(reinterpret_cast<const Byte *>(pod) + it.offset)  );
+                visitor.process(*reinterpret_cast<void ** const>(reinterpret_cast<Byte *>(pod) + it.offset));
+            }
+        }
+        template<class T, class Visitor> inline void processSingleStructField(void * pod, const details::StructFields::FieldsMapItem & it, Visitor & visitor, TypeCategory type)
+        {
+            using Byte = enum : uint8_t {};
+            static_assert(std::is_unsigned<decltype(it.type)>::value, "Pointer level must be unsigned value. Correct processStructFields().");
+            
+            auto ptrLvl = it.type >> 8;
+            if (!ptrLvl) {
+                visitor.process(*reinterpret_cast<T     * const>(reinterpret_cast<Byte *>(pod) + it.offset));
+            } else if (ptrLvl ==1) {
+                visitor.process(*reinterpret_cast<T    ** const>(reinterpret_cast<Byte *>(pod) + it.offset));
+            } else {
+                visitor.process(*reinterpret_cast<void ** const>(reinterpret_cast<Byte *>(pod) + it.offset));
             }
         }
     }} // details // StructFields
@@ -242,8 +300,14 @@ namespace _utl
             constexpr inline const FieldsMapItem *end()   const { return compileTime.m_end;   }
         };
 
-        template<class Visitor, class Pod> static inline void processStructFields(Visitor & visitor, const Pod & pod)
+        template<class Visitor, class Pod> static inline void processStructFields(Visitor & visitor, Pod & pod)
         {
+            static_assert(std::is_class<Pod>::value,
+                "PodIntrospection::processStructFields(): given Pod type is not struct or class!");
+            static_assert(std::is_trivially_copyable<Pod>::value,
+                "PodIntrospection::processStructFields(): given Pod type is not trivially copyable!");
+            static_assert(std::is_default_constructible<Pod>::value,
+                "PodIntrospection::processStructFields(): given Pod type is not default constructible!");
             static constexpr StructFieldsMap<Pod> podMap{};
             for (auto &it : podMap)
             {
@@ -263,6 +327,12 @@ namespace _utl
                     case _utl::TypeSig::type_id<    int32_t>():  details::StructFields::processSingleStructField<    int32_t>(&pod, it, visitor); break;
                     case _utl::TypeSig::type_id<   uint64_t>():  details::StructFields::processSingleStructField<   uint64_t>(&pod, it, visitor); break;
                     case _utl::TypeSig::type_id<    int64_t>():  details::StructFields::processSingleStructField<    int64_t>(&pod, it, visitor); break;
+                    case _utl::TypeSig::method_type_id():    break;
+                    case _utl::TypeSig::function_type_id():  break;
+                    case _utl::TypeSig::union_type_id():     break;
+                    case _utl::TypeSig::enum_type_id():      break;
+                    case _utl::TypeSig::polymorph_type_id(): break;
+                    case _utl::TypeSig::class_type_id():     break;
                     default: std::abort(); break;
                 }
             }

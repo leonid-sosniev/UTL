@@ -10,6 +10,15 @@
             "compilerPath": "/usr/bin/g++",
             "cppStandard": "c++14",
             "intelliSenseMode": "gcc-x64"
+        },
+        {
+            "name": "Windows",
+            "includePath": [
+                "${workspaceFolder}/../"
+            ],
+            "compilerPath": "C:/StrawberryPerl/c/bin/gcc.exe",
+            "cppStandard": "c++14",
+            "intelliSenseMode": "gcc-x64"
         }
     ],
     "version": 4
