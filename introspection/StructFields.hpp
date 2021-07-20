@@ -101,7 +101,7 @@ namespace _utl
             }
             return result;
         }
-        
+
     }
 
     namespace details { namespace StructFields
@@ -178,109 +178,58 @@ namespace _utl
         }
 
         template<class T> struct is_struct {
-            static constexpr bool value = std::is_class<T>::value && std::is_trivially_copyable<T>::value;
+            static constexpr bool value = std::is_class<T>::value && std::is_trivially_copyable<T>::value && std::is_default_constructible<T>::value;
         };
 
-        struct FieldsMapItem
+        template<class T> inline T * alignedPtr(void * ptr, size_t align)
         {
-            TypeSig::Id type;
-            uint32_t offset;
-        };
-        template<class Pod> struct Mapper {
-        private:
-            template<class T, bool isStruct = is_struct<T>::value> struct Selector {};
-            template<class T> struct Selector<T,false>
-            {
-                static constexpr void detectStructOrOpaque(FieldsMapItem *& item, uint32_t &basicOffset, uint32_t &maxAlignment)
-                {
-                    // get info on current field
-                    item->type = TypeSig::Tag<T>::id;
-                    item->offset = (basicOffset + sizeof(T) - 1) / sizeof(T) * sizeof(T); // apply alignment
+            auto p = reinterpret_cast<uintptr_t>(ptr);
+            p = (p + align - 1) / align * align;
+            return reinterpret_cast<T*>(p);
+        }
 
-                    // prepare basic data for the next field
-                    basicOffset = item->offset + sizeof(T);
-                    maxAlignment = (sizeof(T) > maxAlignment) ? sizeof(T) : maxAlignment;
-                    item += 1;
+        template<class Pod, class Visitor> struct FieldsProcessor {
+        private:
+            template<class T, bool isStruct = is_struct<T>::value> struct Selector
+            {};
+            template<class T> struct Selector<T,false> {
+                static void * selectThenAlignThenProcess(void * cursor, Visitor & visitor) {
+                    T * field = alignedPtr<T>(cursor, alignof(T));
+                    visitor.process(*field);
+                    return field + 1;
                 }
             };
-            template<class T> struct Selector<T,true>
-            {
-                static constexpr void detectStructOrOpaque(FieldsMapItem *& it, uint32_t &basicOffset, uint32_t &maxAlignment)
-                {
-                    static_assert(std::is_default_constructible<Pod>::value,
-                        "PodIntrospection::processStructFields(): given Pod type is not default constructible!");
-                    // look ahead and get nested POD alignment
-                    uint32_t nestedPodAlignment = 0;
-                    uint32_t ignoredOffset = 0;
-                    Mapper<T>::getFullMap(it, ignoredOffset, nestedPodAlignment);
-
-                    // take in account this alignment (POD as a whole is aligned as its biggest field)
-                    maxAlignment = std::max(nestedPodAlignment, maxAlignment);
-
-                    // go on and save items into the map
-                    it = Mapper<T>::getFullMap(it, basicOffset, maxAlignment);
-                    basicOffset = (basicOffset + maxAlignment - 1) / maxAlignment * maxAlignment;
+            template<class T> struct Selector<T,true> {
+                static void * selectThenAlignThenProcess(void * cursor, Visitor & visitor) {
+                    T * field = alignedPtr<T>(cursor, alignof(T));
+                    visitor.process(*field);
+                    return alignedPtr<uint8_t>(++field, alignof(T));
                 }
             };
             struct Typer {
-                FieldsMapItem *& it;
-                uint32_t &ofs;
-                uint32_t &alg;
+                void ** cursorPtr;
+                Visitor & visitor;
                 size_t _;
-                template<class T> constexpr operator T () { Selector<T>::detectStructOrOpaque(it, ofs, alg); return T{}; }
+                template<class T> operator T () {
+                    *cursorPtr = Selector<T>::selectThenAlignThenProcess(*cursorPtr, visitor); return T{};
+                }
             };
-            template<size_t...Is> static constexpr FieldsMapItem * map(FieldsMapItem *& mapItemsCursor, uint32_t &currentOffset, uint32_t &maxAlignment, std::index_sequence<Is...>)
-            {
-                Pod _{ Typer{mapItemsCursor,currentOffset,maxAlignment,Is}... };
-                return mapItemsCursor;
-            }
+            template<class P> struct Iterator {
+                template<size_t...Is> static void * iter(void * cursor, Visitor & visitor, std::index_sequence<Is...>) {
+                    P _{ Typer{&cursor,visitor,Is}... };
+                    return cursor;
+                }
+                static void * iterate(void * cursor, Visitor & visitor) {
+                    return iter(cursor, visitor, std::make_index_sequence< getFieldCount<P>() >());
+                }
+            };
         public:
-            static constexpr FieldsMapItem * getFullMap(FieldsMapItem * map_, uint32_t &offset, uint32_t &maxAlignment) {
-                return map(
-                    map_, offset, maxAlignment, std::make_index_sequence< getFieldCount<Pod>() >()
-                );
+            static void processTopLevelFields(Pod & pod, Visitor & visitor) {
+                void * cursor = const_cast<void*>(static_cast<const void *>(&pod));
+                Iterator<Pod>::iterate(cursor, visitor);
             }
         };
-        template<class Pod> struct FieldsMapHelper
-        {
-            static FieldsMapItem MAP[sizeof(Pod) * 8];
-            static const FieldsMapItem *m_begin, *m_end;
-            static uint32_t _x, _xx;
-        };
-        template<class Pod> FieldsMapItem FieldsMapHelper<Pod>::MAP[sizeof(Pod) * 8] = {0};
-        template<class Pod> uint32_t FieldsMapHelper<Pod>::_x = 0;
-        template<class Pod> uint32_t FieldsMapHelper<Pod>::_xx = 0;
-        template<class Pod> const FieldsMapItem *FieldsMapHelper<Pod>::m_begin = FieldsMapHelper<Pod>::MAP;
-        template<class Pod> const FieldsMapItem *FieldsMapHelper<Pod>::m_end = Mapper<Pod>::getFullMap(FieldsMapHelper<Pod>::MAP, FieldsMapHelper<Pod>::_x, FieldsMapHelper<Pod>::_xx);
 
-        template<class T, class Visitor> inline void processSingleStructField(void * pod, const details::StructFields::FieldsMapItem & it, Visitor & visitor)
-        {
-            using Byte = enum : uint8_t {};
-            static_assert(std::is_unsigned<decltype(it.type)>::value, "Pointer level must be unsigned value. Correct processStructFields().");
-            
-            auto ptrLvl = it.type >> 8;
-            if (!ptrLvl) {
-                visitor.process(*reinterpret_cast<T     * const>(reinterpret_cast<Byte *>(pod) + it.offset));
-            } else if (ptrLvl ==1) {
-                visitor.process(*reinterpret_cast<T    ** const>(reinterpret_cast<Byte *>(pod) + it.offset));
-            } else {
-                visitor.process(*reinterpret_cast<void ** const>(reinterpret_cast<Byte *>(pod) + it.offset));
-            }
-        }
-        template<class T, class Visitor> inline void processSingleStructField(void * pod, const details::StructFields::FieldsMapItem & it, Visitor & visitor, TypeCategory type)
-        {
-            using Byte = enum : uint8_t {};
-            static_assert(std::is_unsigned<decltype(it.type)>::value, "Pointer level must be unsigned value. Correct processStructFields().");
-            
-            auto ptrLvl = it.type >> 8;
-            if (!ptrLvl) {
-                visitor.process(*reinterpret_cast<T     * const>(reinterpret_cast<Byte *>(pod) + it.offset));
-            } else if (ptrLvl ==1) {
-                visitor.process(*reinterpret_cast<T    ** const>(reinterpret_cast<Byte *>(pod) + it.offset));
-            } else {
-                visitor.process(*reinterpret_cast<void ** const>(reinterpret_cast<Byte *>(pod) + it.offset));
-            }
-        }
     }} // details // StructFields
 
     struct PodIntrospection
@@ -292,50 +241,25 @@ namespace _utl
             return details::StructFields::getFieldCountRecursive<T>();
         }
         template<class Pod> struct StructFieldsMap {
-        private:
-            static constexpr details::StructFields::FieldsMapHelper<Pod> compileTime = details::StructFields::FieldsMapHelper<Pod>{};
-        public:
-            using FieldsMapItem = details::StructFields::FieldsMapItem;
-            constexpr inline const FieldsMapItem *begin() const { return compileTime.m_begin; }
-            constexpr inline const FieldsMapItem *end()   const { return compileTime.m_end;   }
+            using FieldsMapItem = int;
+            constexpr inline const FieldsMapItem *begin() const { return nullptr; }
+            constexpr inline const FieldsMapItem *end()   const { return nullptr; }
         };
 
-        template<class Visitor, class Pod> static inline void processStructFields(Visitor & visitor, Pod & pod)
+        /**
+        This iterates over the fields of the given POD object and calls Visitor::process(T&) to perform some actions for every field
+        In order to iterate also over nested structures fields the Visitor class must include process<is_class>(T&) overload
+        */
+        template<class Visitor, class Pod> static inline void processTopLevelFields(Visitor & visitor, Pod & pod)
         {
             static_assert(std::is_class<Pod>::value,
-                "PodIntrospection::processStructFields(): given Pod type is not struct or class!");
+                "PodIntrospection::processTopLevelFields(): given Pod type is not struct or class!");
             static_assert(std::is_trivially_copyable<Pod>::value,
-                "PodIntrospection::processStructFields(): given Pod type is not trivially copyable!");
+                "PodIntrospection::processTopLevelFields(): given Pod type is not trivially copyable!");
             static_assert(std::is_default_constructible<Pod>::value,
-                "PodIntrospection::processStructFields(): given Pod type is not default constructible!");
-            static constexpr StructFieldsMap<Pod> podMap{};
-            for (auto &it : podMap)
-            {
-                switch (it.type & 0xFF)
-                {
-                    case _utl::TypeSig::type_id<       char>():  details::StructFields::processSingleStructField<       char>(&pod, it, visitor); break;
-                    case _utl::TypeSig::type_id<   char16_t>():  details::StructFields::processSingleStructField<   char16_t>(&pod, it, visitor); break;
-                    case _utl::TypeSig::type_id<   char32_t>():  details::StructFields::processSingleStructField<   char32_t>(&pod, it, visitor); break;
-                    case _utl::TypeSig::type_id<      float>():  details::StructFields::processSingleStructField<      float>(&pod, it, visitor); break;
-                    case _utl::TypeSig::type_id<     double>():  details::StructFields::processSingleStructField<     double>(&pod, it, visitor); break;
-                    case _utl::TypeSig::type_id<long double>():  details::StructFields::processSingleStructField<long double>(&pod, it, visitor); break;
-                    case _utl::TypeSig::type_id<    uint8_t>():  details::StructFields::processSingleStructField<    uint8_t>(&pod, it, visitor); break;
-                    case _utl::TypeSig::type_id<     int8_t>():  details::StructFields::processSingleStructField<     int8_t>(&pod, it, visitor); break;
-                    case _utl::TypeSig::type_id<   uint16_t>():  details::StructFields::processSingleStructField<   uint16_t>(&pod, it, visitor); break;
-                    case _utl::TypeSig::type_id<    int16_t>():  details::StructFields::processSingleStructField<    int16_t>(&pod, it, visitor); break;
-                    case _utl::TypeSig::type_id<   uint32_t>():  details::StructFields::processSingleStructField<   uint32_t>(&pod, it, visitor); break;
-                    case _utl::TypeSig::type_id<    int32_t>():  details::StructFields::processSingleStructField<    int32_t>(&pod, it, visitor); break;
-                    case _utl::TypeSig::type_id<   uint64_t>():  details::StructFields::processSingleStructField<   uint64_t>(&pod, it, visitor); break;
-                    case _utl::TypeSig::type_id<    int64_t>():  details::StructFields::processSingleStructField<    int64_t>(&pod, it, visitor); break;
-                    case _utl::TypeSig::method_type_id():    break;
-                    case _utl::TypeSig::function_type_id():  break;
-                    case _utl::TypeSig::union_type_id():     break;
-                    case _utl::TypeSig::enum_type_id():      break;
-                    case _utl::TypeSig::polymorph_type_id(): break;
-                    case _utl::TypeSig::class_type_id():     break;
-                    default: std::abort(); break;
-                }
-            }
+                "PodIntrospection::processTopLevelFields(): given Pod type is not default constructible!");
+            
+            _utl::details::StructFields::FieldsProcessor<Pod,Visitor>::processTopLevelFields(pod, visitor);
         }
     };
 

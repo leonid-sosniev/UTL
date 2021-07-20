@@ -3,9 +3,10 @@
 #include <utl/introspection/StructFields.hpp>
 #include <sstream>
 
-enum E : uint8_t {
+enum class E : uint8_t {
     A=37, B=1, C=2
 };
+
 struct S {
     void * _v;
     const double _d;
@@ -31,35 +32,69 @@ struct YYYYY {
     char _5;
 };
 struct XXXXX {
-    YYYYY y;
+    YYYYY s;
     char c;
-    double _d;
+    double d;
     uint16_t h;
+    YYYYY s2;
     int i;
-    const char * _c;
-    E e_;
+    const char * cp;
+    E e;
     void (*f)();
+};
+
+struct X1 {
+    char c;
+    uint32_t u;
+};
+struct X2 {
+    uint32_t u;
+    char c;
+};
+struct Y1 {
+    X1 x;
+    short s;
+    E e;
+};
+struct Y2 {
+    short s;
+    X1 x;
+    E e;
+};
+struct Y3 {
+    X2 x;
+    short s;
+    E e;
+};
+struct Y4 {
+    short s;
+    X2 x;
+    E e;
 };
 
 struct Visitor {
     std::stringstream str;
-    void process(const char * v) {
-        str << v << ' ';
-    }
-    void process(void * v) {
-        str << v << ' ';
-    }
+public:
     template<class T> void process(const T * v) {
-        str << *v << ' ';
+        str << v << ' ';
     }
     template<class T> typename std::enable_if<std::is_fundamental<T>::value>::type process(const T & v) {
         str << v << ' ';
     }
-    template<class T> void process(const E & v) {
-        str << (typename std::underlying_type<E>::type) v << ' ';
+    template<class T> typename std::enable_if<std::is_enum<T>::value>::type process(const T & v) {
+        str << (int) v << ' ';
     }
-    void process(const void(*v)()) {
+    template<class T> typename std::enable_if<std::is_class<T>::value && !std::is_enum<T>::value>::type process(const T & v) {
+        _utl::PodIntrospection::processTopLevelFields(*this, v);
+    }
+    template<class T, class ...Args> void process(T(*v)(Args...)) {
         str << (void*) v << ' ';
+    }
+    template<class T, class C, class ...Args> void process(T(C::*v)(Args...)) {
+        str << (void*) v << ' ';
+    }
+    void process(...) {
+        str << "UNEXPECTED ";
     }
 };
 
@@ -82,30 +117,21 @@ TEST_CASE("get number of fields in struct", "introspection")
     REQUIRE(recM == 5);
     REQUIRE(recD == 10);
 
-    constexpr auto FM = _utl::PodIntrospection::StructFieldsMap<XXXXX>{};
-    auto fmIter = FM.begin();
-    XXXXX f;
-    REQUIRE(  fmIter[0x0].offset == ((char*)&f.y._1 - (char*)&f)  );
-    REQUIRE(  fmIter[0x1].offset == ((char*)&f.y._2 - (char*)&f)  );
-    REQUIRE(  fmIter[0x2].offset == ((char*)&f.y._3 - (char*)&f)  );
-    REQUIRE(  fmIter[0x3].offset == 8  );
-    REQUIRE(  fmIter[0x3].offset == ((char*)&f.y.d  - (char*)&f)  );
-    REQUIRE(  fmIter[0x4].offset == ((char*)&f.y._4 - (char*)&f)  );
-    REQUIRE(  fmIter[0x5].offset == ((char*)&f.y._5 - (char*)&f)  );
-    REQUIRE(  fmIter[0x6].offset == ((char*)&f.c    - (char*)&f)  );
-    REQUIRE(  fmIter[0x7].offset == ((char*)&f._d   - (char*)&f)  );
-    REQUIRE(  fmIter[0x8].offset == ((char*)&f.h    - (char*)&f)  );
-    REQUIRE(  fmIter[0x9].offset == ((char*)&f.i    - (char*)&f)  );
-    REQUIRE(  fmIter[0xA].offset == ((char*)&f._c   - (char*)&f)  );
-    REQUIRE(  fmIter[0xB].offset == ((char*)&f.e_ - (char*)&f)  );
-    REQUIRE(  fmIter[0xC].offset == ((char*)&f.f - (char*)&f)  );
-
-    for (auto &it : FM) {
-        std::cout << "[" << it.offset << "] " << (char) it.type << std::endl;
-    }
-
-    f = { '@', 'b', '$', 5.12, '!', '`', '?', 0.5, 1234, -1, "literal", E::A, nullptr };
     Visitor V;
-    _utl::PodIntrospection::processStructFields(V, f);
-    REQUIRE(V.str.str() == "@ b $ 5.12 ! ` ? 0.5 1234 -1 literal 37 nullptr ");
+
+    Y1 a{ {'?',1}, 2, E::A };
+    Y2 b{ 3, {'!',4}, E::A };
+    Y3 c{ {5,'?'}, 6, E::A };
+    Y4 d{ 7, {8,'!'}, E::A };
+    _utl::PodIntrospection::processTopLevelFields(V, a);
+    _utl::PodIntrospection::processTopLevelFields(V, b);
+    _utl::PodIntrospection::processTopLevelFields(V, c);
+    _utl::PodIntrospection::processTopLevelFields(V, d);
+    REQUIRE(V.str.str() == "? 1 2 37 3 ! 4 37 5 ? 6 37 7 8 ! 37 ");
+
+    V.str.str("");
+
+    XXXXX pod = { { '@', 'b', '$', 5.12, '!', '`' }, '?', 0.5, 1234, { '`', '!', '$', 12.5, 'b', '@' }, -1, "literal", E::A, nullptr };
+    _utl::PodIntrospection::processTopLevelFields(V, pod);
+    REQUIRE(V.str.str() == "@ b $ 5.12 ! ` ? 0.5 1234 ` ! $ 12.5 b @ -1 literal 37 0 ");
 }
