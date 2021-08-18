@@ -73,6 +73,7 @@ struct Y3 {
 struct Y4 {
     short s;
     X2 x;
+    std::array<char,4> v;
     E e;
 };
 
@@ -129,12 +130,12 @@ TEST_CASE("get number of fields in struct", "introspection")
     Y1 a{ {'?',1}, 2, E::A };
     Y2 b{ 3, {'!',4}, E::A };
     Y3 c{ {5,'?'}, 6, 1, E::A };
-    Y4 d{ 7, {8,'!'}, E::A };
+    Y4 d{ 7, {8,'!'}, { 'w', 'x', 'y', 'z' }, E::A };
     _utl::PodIntrospection::processTopLevelFields(V, a);
     _utl::PodIntrospection::processTopLevelFields(V, b);
     _utl::PodIntrospection::processTopLevelFields(V, c);
     _utl::PodIntrospection::processTopLevelFields(V, d);
-    REQUIRE(V.str.str() == "? 1 2 37 3 ! 4 37 5 ? 6 union(8) 37 7 8 ! 37 ");
+    REQUIRE(V.str.str() == "? 1 2 37 3 ! 4 37 5 ? 6 union(8) 37 7 8 ! w x y z 37 ");
 
     V.str.str("");
 
