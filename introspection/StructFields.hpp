@@ -150,7 +150,7 @@ namespace _utl
 
         template<class Pod> struct GetFieldCountRecursive {
         private:
-            template<class T, bool isScalar = std::is_scalar<T>::value> struct Selector {};
+            template<class T, bool isScalar = std::is_scalar<T>::value || std::is_union<T>::value> struct Selector {};
             template<class T> struct Selector<T,true> {
                 static constexpr size_t advancedArg(size_t cnt) { return cnt + 1; }
             };

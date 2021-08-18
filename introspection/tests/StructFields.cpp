@@ -64,6 +64,10 @@ struct Y2 {
 struct Y3 {
     X2 x;
     short s;
+    union U {
+        int k;
+        X2 n;
+    } u;
     E e;
 };
 struct Y4 {
@@ -83,6 +87,9 @@ public:
     }
     template<class T> typename std::enable_if<std::is_enum<T>::value>::type process(const T & v) {
         str << (int) v << ' ';
+    }
+    template<class T> typename std::enable_if<std::is_union<T>::value>::type process(const T & v) {
+        str << "union(" << sizeof(T) << ") ";
     }
     template<class T> typename std::enable_if<std::is_class<T>::value && !std::is_enum<T>::value>::type process(const T & v) {
         _utl::PodIntrospection::processTopLevelFields(*this, v);
@@ -121,13 +128,13 @@ TEST_CASE("get number of fields in struct", "introspection")
 
     Y1 a{ {'?',1}, 2, E::A };
     Y2 b{ 3, {'!',4}, E::A };
-    Y3 c{ {5,'?'}, 6, E::A };
+    Y3 c{ {5,'?'}, 6, 1, E::A };
     Y4 d{ 7, {8,'!'}, E::A };
     _utl::PodIntrospection::processTopLevelFields(V, a);
     _utl::PodIntrospection::processTopLevelFields(V, b);
     _utl::PodIntrospection::processTopLevelFields(V, c);
     _utl::PodIntrospection::processTopLevelFields(V, d);
-    REQUIRE(V.str.str() == "? 1 2 37 3 ! 4 37 5 ? 6 37 7 8 ! 37 ");
+    REQUIRE(V.str.str() == "? 1 2 37 3 ! 4 37 5 ? 6 union(8) 37 7 8 ! 37 ");
 
     V.str.str("");
 
