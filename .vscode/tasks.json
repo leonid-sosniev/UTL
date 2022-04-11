@@ -1,0 +1,33 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "inputs": [
+        {
+            "id": "ExeName",
+            "type": "promptString",
+            "description": "Name of executable in release/",
+        },
+        {
+            "id": "Dir",
+            "type": "promptString",
+            "description": "Subdirectory in utl/",
+        }
+    ],
+    "tasks": [
+        {
+            "label": "Build",
+            "type": "shell",
+            "command": "python3",
+            "args": [
+                "build.py",
+                "-i", "/usr/local/include,/usr/local/include/,${workspaceFolder}/..",
+                "${workspaceFolder}/${input:Dir}/**/*.cpp ",
+                "${workspaceFolder}/release/",
+                "${input:ExeName}"
+            ],
+            "group": "build",
+            "problemMatcher": []
+        }
+    ]
+}

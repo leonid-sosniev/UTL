@@ -1,0 +1,12 @@
+{
+    "files.associations": {
+        "thread": "cpp",
+        "stdexcept": "cpp"
+    },
+    "C_Cpp.intelliSenseEngineFallback": "Enabled",
+    "C_Cpp.autocomplete": "Default",
+    "C_Cpp.configurationWarnings": "Enabled",
+    "C_Cpp.intelliSenseEngine": "Default",
+    "C_Cpp.default.cStandard": "c99",
+    "C_Cpp.default.cppStandard": "c++11"
+}
