@@ -18,11 +18,12 @@ def isOption(s: str):
 def parseGlobCommaList(argvItem: str):
     result = list()
     for globPattern in argvItem.split(','):
+        print("matching a glob pattern: ", globPattern)
         globPattern = globPattern.strip()
         if (len(globPattern) == 0):
             continue
         for filePath in glob.glob(globPattern, recursive = True):
-            result.append(filePath)
+            result.append(os.path.abspath(filePath))
     return result
 
 print("=" * 80)
@@ -72,23 +73,43 @@ except Exception as exc:
     help()
 
 print("=" * 80)
-# add basic options
-options = [ "g++", "-m64", "-o", os.path.join(ResultDir,TargetName), "-x", "c++", "-g", "-std=c++14", "-pedantic", "-pipe", "-pthread", "-B", "/usr/local/include", "-Wall", "-Wextra" ]
-# add include dir paths
-for path in IncludeDirsCommaList: options += [ "-I%s"%path ]
-# add source files *
-for path in SourceFilesCommaList: options += [ "-v", path  ]
-# add static GCC libraries
-options += [ "-lrt", "-lstdc++fs", "-lcrypto", "-pipe", "-pthread" ]
 
+compilerName = ""
+while True:
+    compilerName = "clang++"
+    try:
+        subprocess.call(compilerName)
+        options = [
+            "-std=c++14", "-march=x86-64", "-g", "-o", os.path.join(ResultDir,TargetName),
+            "-pedantic", "-Wall", "-Wextra", "-O0"
+        ]
+        for path in IncludeDirsCommaList: options += [ "-I%s"%path ]
+        for path in SourceFilesCommaList: options += [ path ]
+        break
+    except:
+        print(compilerName, "was not found")
+    #
+    compilerName = "g++"
+    try:
+        subprocess.call(compilerName)
+        options = [
+            "-m64", "-o", os.path.join(ResultDir,TargetName), "-x", "c++", "-g",
+            "-std=c++14", "-pedantic", "-pipe", "-pthread", "-B", "/usr/local/include",
+            "-Wall", "-Wextra", "-lrt", "-lstdc++fs", "-lcrypto", "-pipe", "-pthread", "-O0"
+        ]
+        for path in IncludeDirsCommaList: options += [ "-I%s"%path ]
+        for path in SourceFilesCommaList: options += [ path ]
+        break
+    except:
+        print(compilerName, "was not found")
+    #
+    break
+#
 print("=" * 80)
+print("THE COMPILER USED:", compilerName)
 print("OPTIONS TO COMPILER:", options)
 print("=" * 80)
 time.sleep(1)
 
-# run build
-exitCode = subprocess.call(options)
-if exitCode != 0:
-    print("="*80, "NONZERO EXIT CODE:", exitCode)
-else:
-    print("="*80, "SUCCESS")
+exitCode = subprocess.call([compilerName] + options)
+print("SUCCESS" if exitCode==0 else "FAILURE")
