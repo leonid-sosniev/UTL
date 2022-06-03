@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cctype>
 #include <cstdarg>
 #include <cstddef>
@@ -63,6 +64,7 @@ namespace _utl { namespace logging {
             TI_Char      = 22, TI_arrayof_Char      = 23,
             TI_Thread    = 24, TI_arrayof_Thread    = 25,
             TI_EpochNsec = 26, TI_arrayof_EpochNsec = 27,
+            TI_UNKNOWN   = 28,
             __TYPE_ID_COUNT
         };
         static uint8_t typeSize(TypeID type) {
@@ -82,12 +84,25 @@ namespace _utl { namespace logging {
                 sizeof(ThreadId), sizeof(ThreadId),
                 sizeof(TimePoint), sizeof(TimePoint),
             };
-            return typeId2Size[(int) type];
+            if (unsigned(type) >= (unsigned) TypeID::__TYPE_ID_COUNT) {
+                throw std::runtime_error{ "Arg::typeSize() was given an invalid type ID" };
+            }
+            return typeId2Size[(unsigned) type];
         }
-        Value value;
+        Value valueOrArray;
         TypeID type;
-        uint32_t optionalArrayLength;
+        uint32_t arrayLength;
     };
+    inline Arg::TypeID operator|(Arg::TypeID a, Arg::TypeID b)
+    {
+        assert(a == Arg::TypeID::__ISARRAY || b == Arg::TypeID::__ISARRAY);
+        return static_cast<Arg::TypeID>(int(a) | int(b));
+    }
+    inline Arg::TypeID operator&(Arg::TypeID a, Arg::TypeID b)
+    {
+        assert(a == Arg::TypeID::__ISARRAY || b == Arg::TypeID::__ISARRAY);
+        return static_cast<Arg::TypeID>(int(a) & int(b));
+    }
 
     struct EventAttributes {
         const Str messageFormat, function, file;
@@ -155,7 +170,9 @@ namespace _utl { namespace logging {
     };
 
 namespace {
-    template<class T> struct TypeIDGetter;
+    template<class T> struct TypeIDGetter {
+        static constexpr Arg::TypeID value = Arg::TypeID::TI_UNKNOWN;
+    };
     template<> struct TypeIDGetter<char>     { static constexpr Arg::TypeID value = Arg::TypeID::TI_Char; };
     template<> struct TypeIDGetter<float>    { static constexpr Arg::TypeID value = Arg::TypeID::TI_f32; };
     template<> struct TypeIDGetter<double>   { static constexpr Arg::TypeID value = Arg::TypeID::TI_f64; };
@@ -170,12 +187,12 @@ namespace {
 
     inline void logEvent_sfinae(Arg * arg, std::thread::id && a) {
         arg->type = Arg::TypeID::TI_Thread;
-        std::memcpy(&arg->value.Thread, &a, sizeof(a));
+        std::memcpy(&arg->valueOrArray.Thread, &a, sizeof(a));
     }
     inline void logEvent_sfinae_pchar(Arg * arg, const char * p) {
-        arg->type = static_cast<Arg::TypeID>((int)TypeID<char>::value | (int)Arg::TypeID::__ISARRAY);
-        arg->value.ArrayPointer = p;
-        arg->optionalArrayLength = std::strlen(p);
+        arg->type = static_cast<Arg::TypeID>((int)TypeIDGetter<char>::value | (int)Arg::TypeID::__ISARRAY);
+        arg->valueOrArray.ArrayPointer = p;
+        arg->arrayLength = std::strlen(p);
     }
     inline void logEvent_sfinae(Arg * arg, const char * p) {
         logEvent_sfinae_pchar(arg, p);
@@ -185,16 +202,16 @@ namespace {
     }
     template<class C, class D> inline void logEvent_sfinae(Arg * arg, std::chrono::time_point<C,D> && a) {
         arg->type = Arg::TypeID::TI_EpochNsec;
-        arg->value.EpochNsec = a.time_since_epoch().count();
+        arg->valueOrArray.EpochNsec = a.time_since_epoch().count();
     }
     template<size_t N> inline void logEvent_sfinae(Arg * arg, const char (&p)[N]) {
-        arg->type = static_cast<Arg::TypeId>((int)TypeID<char>::value | (int)Arg::TypeID::__ISARRAY);
-        arg->value.ArrayPointer = &p[0];
-        arg->optionalArrayLength = N-1;
+        arg->type = static_cast<Arg::TypeID>((int)TypeIDGetter<char>::value | (int)Arg::TypeID::__ISARRAY);
+        arg->valueOrArray.ArrayPointer = &p[0];
+        arg->arrayLength = N-1;
     }
     template<class T> inline void logEvent_sfinae(Arg * arg, T && a) {
-        arg->type = TypeID<T>::value;
-        std::memcpy(&arg->value, &a, sizeof(T));
+        arg->type = TypeIDGetter<T>::value;
+        std::memcpy(&arg->valueOrArray, &a, sizeof(T));
     }
     template<class T, class...Ts> inline void logEvent_sfinae(Arg * argBuf, T && fst, Ts &&... args) {
         logEvent_sfinae(argBuf++, std::forward<T&&>(fst));
