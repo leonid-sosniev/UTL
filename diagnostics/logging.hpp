@@ -175,6 +175,9 @@ namespace internal {
             for (;;)
             {
                 register uint32_t acquireIndex = m_acquireIndex;
+                if (releaseIndex_old == acquireIndex) {
+                    return;
+                }
                 register uint32_t releaseIndex_new = releaseIndex_old + size;
                 if (releaseIndex_old <= acquireIndex)
                 {
