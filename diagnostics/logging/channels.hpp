@@ -89,39 +89,43 @@ namespace
             , m_popIndex(0)
             , m_pushIndex(0)
         {}
-        inline void enqueue(TItem && item)
+        bool tryEnqueue(TItem && item)
         {
-            for (uint32_t push;;)
+            uint32_t push = m_pushIndex;
+            auto push_new = (push + 1) % m_capacity;
+            if (push_new != m_popIndex && m_pushIndex.compare_exchange_weak(push, push_new))
             {
-                push = m_pushIndex;
-                auto push_new = (push + 1) % m_capacity;
-
-                if (push_new != m_popIndex && m_pushIndex.compare_exchange_weak(push, push_new))
-                {
-                    m_items[push] = std::move(item);
-                    auto m_usedCount_debugValue = m_usedCount.fetch_add(1);
-                    assert(m_usedCount_debugValue < m_capacity);
-                    return;
-                }
+                m_items[push] = std::move(item);
+                auto m_usedCount_debugValue = m_usedCount.fetch_add(1);
+                assert(m_usedCount_debugValue < m_capacity);
+                return true;
             }
+            return false;
         }
-        inline TItem dequeue()
+        bool tryDequeue(TItem & dest)
         {
-            for (uint32_t usedCount;;)
+            uint32_t usedCount = m_usedCount;
+            if (usedCount > 0 && m_usedCount.compare_exchange_weak(usedCount, usedCount - 1))
             {
-                usedCount = m_usedCount;
-                if (usedCount > 0 && m_usedCount.compare_exchange_weak(usedCount, usedCount - 1))
+                for (uint32_t pop;;)
                 {
-                    for (uint32_t pop;;)
+                    pop = m_popIndex;
+                    if (m_popIndex.compare_exchange_weak(pop, (pop + 1) % m_capacity))
                     {
-                        pop = m_popIndex;
-                        if (m_popIndex.compare_exchange_weak(pop, (pop + 1) % m_capacity))
-                        {
-                            return std::move(m_items[pop]);
-                        }
+                        dest = std::move(m_items[pop]);
+                        return true;
                     }
                 }
             }
+            return false;
+        }
+        inline void enqueue(TItem && item) {
+            while (!tryEnqueue(std::move(item))) {}
+        }
+        inline TItem dequeue() {
+            TItem item;
+            while (!tryDequeue(item)) {}
+            return std::move(item);
         }
     };
 } // anonimous namespace
