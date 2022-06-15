@@ -446,6 +446,7 @@ namespace
             if (!m_eventQueue.tryDequeue(trace)) return false;
             if (!trace.args) {
                 m_formatter.formatEventAttributes(m_writer, *trace.attrs);
+                return tryReceiveAndProcessEvent();
             } else {
                 m_formatter.formatEvent(m_writer, *trace.attrs, trace.args);
                 releaseArgs(trace.attrs->argumentsExpected);
