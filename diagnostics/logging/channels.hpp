@@ -22,6 +22,7 @@
 #endif
 
 #include <atomic>
+#include <cassert>
 
 namespace _utl { namespace logging {
 
