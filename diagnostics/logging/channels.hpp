@@ -90,6 +90,7 @@ namespace
             , m_popIndex(0)
             , m_pushIndex(0)
         {}
+        bool isEmpty() const { return !m_usedCount; }
         bool tryEnqueue(TItem && item)
         {
             uint32_t push = m_pushIndex;
