@@ -141,6 +141,7 @@ namespace internal {
         LocklessCircularAllocator & operator=(const LocklessCircularAllocator &) = delete;
         LocklessCircularAllocator & operator=(LocklessCircularAllocator &&) = delete;
 
+        inline bool isEmpty() { return m_acquireIndex == m_releaseIndex; }
         inline TItem * acquire(uint32_t size)
         {
             uint32_t acquireIndex_old = m_acquireIndex;
