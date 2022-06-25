@@ -113,7 +113,7 @@ public:
         writer->write(attr.messageFormat.str, attr.messageFormat.end - attr.messageFormat.str);
         writer->write("\" ", 2);
 
-        for (uint16_t i = 0; i < attr.argumentsExpected; ++i) {
+        for (uint16_t i = 0; i < attr.argumentsExpected; ++i,++arg) {
             writer->write(" // ", 4);
             switch (arg->type) {
                 #define WRITE_ARRAY_OF(TYPE) \
