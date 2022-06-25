@@ -188,6 +188,56 @@ namespace
             m_writableSize = m_size - m_readableSize;
         }
     };
+
+    template<typename TItem> class ConcurrentQueue {
+        std::atomic<uint32_t> m_usedCount;
+        std::atomic<uint32_t> m_pushIndex;
+        std::atomic<uint32_t> m_popIndex;
+        uint32_t m_capacity;
+        TItem * m_items;
+    public:
+        ConcurrentQueue(uint32_t capacity)
+            : m_items(new TItem[capacity])
+            , m_capacity(capacity)
+            , m_usedCount(0)
+            , m_popIndex(0)
+            , m_pushIndex(0)
+        {}
+        inline void enqueue(TItem && item)
+        {
+            for (uint32_t push;;)
+            {
+                push = m_pushIndex;
+                auto push_new = (push + 1) % m_capacity;
+
+                if (push_new != m_popIndex && m_pushIndex.compare_exchange_weak(push, push_new))
+                {
+                    m_items[push] = std::move(item);
+                    auto m_usedCount_debugValue = m_usedCount.fetch_add(1);
+                    assert(m_usedCount_debugValue < m_capacity);
+                    return;
+                }
+            }
+        }
+        inline TItem dequeue()
+        {
+            for (uint32_t usedCount;;)
+            {
+                usedCount = m_usedCount;
+                if (usedCount > 0 && m_usedCount.compare_exchange_weak(usedCount, usedCount - 1))
+                {
+                    for (uint32_t pop;;)
+                    {
+                        pop = m_popIndex;
+                        if (m_popIndex.compare_exchange_weak(pop, (pop + 1) % m_capacity))
+                        {
+                            return std::move(m_items[pop]);
+                        }
+                    }
+                }
+            }
+        }
+    };
 } // anonimous namespace
 
     class WebEventChannel : public AbstractEventChannel {
