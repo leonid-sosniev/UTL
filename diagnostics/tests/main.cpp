@@ -151,17 +151,16 @@ TEST_CASE("smoke sequential", "[validation]")
     RawEventFormatter fmt{};
     FlatBufferWriter wtr{ buf.data(), buf.size() };
     InterThreadEventChannel chan{ fmt, wtr, 300 };
-    EventLogger<InterThreadEventChannel> logger{ chan }; 
 
     // all data fits in the buffer
     auto p_1 = (char*) wtr.position();
-    for (int i = 0; i < 2; ++i) { UTL_logev(logger, "1234567890-", 1u, -1, 0.2, '3', strArr[i]); }
+    for (int i = 0; i < 2; ++i) { UTL_logev(chan, "1234567890-", 1u, -1, 0.2, '3', strArr[i]); }
     for (int i = 0; i < 2; ++i) { while (!chan.tryReceiveAndProcessEvent()) {} }
     VALIDATE_INTERTHREAD_OUTPUT(p_1);
 
     // wrapping up the buffer end
     auto p_2 = (char*) wtr.position();
-    for (int i = 0; i < 2; ++i) { UTL_logev(logger, "1234567890-", 1u, -1, 0.2, '3', strArr[i]); }
+    for (int i = 0; i < 2; ++i) { UTL_logev(chan, "1234567890-", 1u, -1, 0.2, '3', strArr[i]); }
     for (int i = 0; i < 2; ++i) { while (!chan.tryReceiveAndProcessEvent()) {} }
     VALIDATE_INTERTHREAD_OUTPUT(p_2);
 }
@@ -174,8 +173,6 @@ TEST_CASE("local inter-threaded", "[validation]")
     RawEventFormatter fmt{};
     FlatBufferWriter wtr{ buf.data(), buf.size() };
     InterThreadEventChannel chan{ fmt, wtr, 128 }; // -- too small to store two events -- only one at a time
-    EventLogger<InterThreadEventChannel> logger{ chan };
-
     std::packaged_task<void()> reader{
         [&wtr,&chan]() {
             try {
@@ -191,10 +188,10 @@ TEST_CASE("local inter-threaded", "[validation]")
         }
     };
     std::packaged_task<void()> writer{
-        [&logger]() {
+        [&chan]() {
             try {
                 for (int i = 0; i < 2; ++i) {
-                    UTL_logev(logger, "1234567890-", 1u, -1, 0.2, '3', strArr[i % 2]);
+                    UTL_logev(chan, "1234567890-", 1u, -1, 0.2, '3', strArr[i % 2]);
                 }
             } catch (...) {
                 REQUIRE(false);
@@ -214,9 +211,8 @@ TEST_CASE("socket-based (inter-threaded)", "[validation]")
         []() {
             std::this_thread::sleep_for(std::chrono::seconds{10});
             auto wchan = WebEventChannel::createSender(12345, { 127, 0, 0, 1 });
-            EventLogger<WebEventChannel> logger{ *wchan };
             for (int i = 0; i < 2; ++i) {
-                UTL_logev(logger, "1234567890-", 1u, -1, 0.2, '3', strArr[i]);
+                UTL_logev(*wchan, "1234567890-", 1u, -1, 0.2, '3', strArr[i]);
             }
         }
     };
@@ -290,9 +286,8 @@ TEST_CASE("InterThreadEventChannel benchmark", "[benchmark]")
         name = "InterThreadEventChannel 16MB";
     }
     InterThreadEventChannel chan{ fmt, wtr, bufferSize };
-    EventLogger<InterThreadEventChannel> log{ chan };
     ThreadWorker<InterThreadEventChannel> C{chan};
     BENCHMARK(name) {
-        UTL_logev(log, "this is some message to be logged here and consumed");
+        UTL_logev(chan, "this is some message to be logged here and consumed");
     };
 }

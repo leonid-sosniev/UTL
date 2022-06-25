@@ -145,10 +145,9 @@ namespace _utl { namespace logging {
         {}
         virtual ~AbstractEventChannel() {}
         virtual bool tryReceiveAndProcessEvent() = 0;
-    private:
-        template<class,class> friend class EventLogger;
         inline void sendEventAttributes(const EventAttributes & attr) { sendEventAttributes_(attr); }
         inline void sendEventOccurrence(const EventAttributes & attr, const Arg args[]) { sendEventOccurrence_(attr, args); }
+    private:
         virtual void sendEventAttributes_(const EventAttributes & attr) = 0;
         virtual void sendEventOccurrence_(const EventAttributes & attr, const Arg args[]) = 0;
     };
@@ -224,30 +223,21 @@ namespace {
     }
     inline void logEvent_sfinae(Arg * argBuf) { argBuf->type = Arg::TypeID::TI_NONE; }
 }
+    template<typename TEventChannel>
+    inline const EventID registerEvent(TEventChannel & channel, const EventAttributes & attr)
+    {
+        channel.AbstractEventChannel::sendEventAttributes(attr);
+        return attr.id;
+    }
     template<
-        class TEventChannel = AbstractEventChannel,
-        class = typename std::enable_if<std::is_base_of<AbstractEventChannel,TEventChannel>::value>::type
+        typename TEventChannel, class...Ts,
+        typename = typename std::enable_if<std::is_base_of<AbstractEventChannel,TEventChannel>::value>::type
     >
-    class EventLogger {
-        TEventChannel & m_wtr;
-    public:
-        EventLogger(TEventChannel & conduit) : m_wtr(conduit)
-        {}
-        inline const EventID registerEvent(const EventAttributes & attr)
-        {
-            m_wtr.AbstractEventChannel::sendEventAttributes(attr);
-            return attr.id;
-        }
-        inline void logEvent(const EventAttributes & attr, const Arg args[])
-        {
-            m_wtr.AbstractEventChannel::sendEventOccurrence(attr, args);
-        }
-    };
-    template<class Logger, class...Ts> inline void logEvent(Logger & logger, const EventAttributes & attributes, Ts &&... args)
+    inline void logEvent(TEventChannel & channel, const EventAttributes & attributes, Ts &&... args)
     {
         Arg argBuf[sizeof...(args) + 1];
         logEvent_sfinae(&argBuf[0], std::forward<Ts&&>(args)...);
-        logger.logEvent(attributes, argBuf);
+        channel.AbstractEventChannel::sendEventOccurrence(attributes, argBuf);
     }
 
     template<
@@ -300,7 +290,7 @@ namespace {
             __LINE__, \
             _utl::logging::count_of(__VA_ARGS__) \
         }; \
-        static auto purposed_to_call_registerEvent_once = CHANNEL.registerEvent(cpd); \
+        static auto purposed_to_call_registerEvent_once = registerEvent(CHANNEL,cpd); \
         _utl::logging::logEvent(CHANNEL,cpd,##__VA_ARGS__); \
     }
 
