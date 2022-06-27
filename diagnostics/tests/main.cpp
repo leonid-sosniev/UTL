@@ -47,18 +47,18 @@ namespace {
         0, 3+1, 5+1, 0, 10, 0, 0, 0, 20 // digit count must be even 'cause printDecimal prints digit pairs
     };
 
-    inline auto printDecimal(char * buffer, const float & number, const char *& out_end) -> char*
+    inline auto printDecimal(char * buffer, const float & number, char *& out_end) -> char*
     {
         out_end = buffer + std::snprintf(buffer, 32, "%0.7f", number);
         return buffer;
     }
-    inline auto printDecimal(char * buffer, const double & number, const char *& out_end) -> char*
+    inline auto printDecimal(char * buffer, const double & number, char *& out_end) -> char*
     {
         out_end = buffer + std::snprintf(buffer, 32, "%0.16f", number);
         return buffer;
     }
     template<typename T>
-    inline auto printDecimal(char * buffer, const T & number, const char *& out_end)
+    inline auto printDecimal(char * buffer, const T & number, char *& out_end)
         -> typename std::enable_if<std::is_unsigned<T>::value && std::is_integral<T>::value,char*>::type
     {
         using N = typename std::remove_cv<T>::type;
@@ -76,7 +76,7 @@ namespace {
         return *p == '0' ? p2 : p;
     }
     template<typename T>
-    inline auto printDecimal(char * buffer, const T & number, const char *& out_end)
+    inline auto printDecimal(char * buffer, const T & number, char *& out_end)
         -> typename std::enable_if<std::is_signed<T>::value && std::is_integral<T>::value,char*>::type
     {
         using U = typename std::make_unsigned<T>::type;
@@ -96,8 +96,8 @@ public:
     }
     void formatEvent(AbstractWriter & wtr, const EventAttributes & attr, const Arg arg[]) override {
         AbstractWriter * writer = &wtr;
-        const char * fmtStr;
-        const char * fmtEnd;
+        char * fmtStr;
+        char * fmtEnd;
         char fmtBuf[64];
 
         writer->write("[ ", 2);
@@ -119,8 +119,8 @@ public:
                 #define WRITE_ARRAY_OF(TYPE) \
                     for (uint32_t i = 0; i < arg->arrayLength; ++i) { \
                         fmtStr = printDecimal(fmtBuf, static_cast<const TYPE*>(arg->valueOrArray.ArrayPointer)[i], fmtEnd); \
+                        *fmtEnd++ = ','; \
                         writer->write(fmtStr,fmtEnd-fmtStr); \
-                        writer->write(",",1); \
                     }
                 case Arg::TypeID::TI_arrayof_u8:        WRITE_ARRAY_OF(uint8_t);  break;
                 case Arg::TypeID::TI_arrayof_u16:       WRITE_ARRAY_OF(uint16_t); break;
@@ -132,20 +132,20 @@ public:
                 case Arg::TypeID::TI_arrayof_i64:       WRITE_ARRAY_OF(int64_t);  break;
                 case Arg::TypeID::TI_arrayof_f32:       WRITE_ARRAY_OF(float);    break;
                 case Arg::TypeID::TI_arrayof_f64:       WRITE_ARRAY_OF(double);   break;
-                case Arg::TypeID::TI_arrayof_Char:      writer->write((char*) arg->valueOrArray.ArrayPointer, arg->arrayLength); break;
+                case Arg::TypeID::TI_arrayof_Char:      writer->write((char*) arg->valueOrArray.ArrayPointer, arg->arrayLength); writer->write(",",1); break;
                 case Arg::TypeID::TI_arrayof_Thread:    break;
                 case Arg::TypeID::TI_arrayof_EpochNsec: break;
                 #undef WRITE_ARRAY_OF
-                case Arg::TypeID::TI_u8:        fmtStr = printDecimal(fmtBuf, arg->valueOrArray.u8 , fmtEnd);  writer->write(fmtStr,fmtEnd-fmtStr);  break;
-                case Arg::TypeID::TI_u16:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.u16, fmtEnd);  writer->write(fmtStr,fmtEnd-fmtStr);  break;
-                case Arg::TypeID::TI_u32:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.u32, fmtEnd);  writer->write(fmtStr,fmtEnd-fmtStr);  break;
-                case Arg::TypeID::TI_u64:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.u64, fmtEnd);  writer->write(fmtStr,fmtEnd-fmtStr);  break;
-                case Arg::TypeID::TI_i8:        fmtStr = printDecimal(fmtBuf, arg->valueOrArray.i8 , fmtEnd);  writer->write(fmtStr,fmtEnd-fmtStr);  break;
-                case Arg::TypeID::TI_i16:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.i16, fmtEnd);  writer->write(fmtStr,fmtEnd-fmtStr);  break;
-                case Arg::TypeID::TI_i32:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.i32, fmtEnd);  writer->write(fmtStr,fmtEnd-fmtStr);  break;
-                case Arg::TypeID::TI_i64:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.i64, fmtEnd);  writer->write(fmtStr,fmtEnd-fmtStr);  break;
-                case Arg::TypeID::TI_f32:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.f32, fmtEnd);  writer->write(fmtStr,fmtEnd-fmtStr);  break;
-                case Arg::TypeID::TI_f64:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.f64, fmtEnd);  writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                case Arg::TypeID::TI_u8:        fmtStr = printDecimal(fmtBuf, arg->valueOrArray.u8 , fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                case Arg::TypeID::TI_u16:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.u16, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                case Arg::TypeID::TI_u32:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.u32, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                case Arg::TypeID::TI_u64:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.u64, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                case Arg::TypeID::TI_i8:        fmtStr = printDecimal(fmtBuf, arg->valueOrArray.i8 , fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                case Arg::TypeID::TI_i16:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.i16, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                case Arg::TypeID::TI_i32:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.i32, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                case Arg::TypeID::TI_i64:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.i64, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                case Arg::TypeID::TI_f32:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.f32, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                case Arg::TypeID::TI_f64:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.f64, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
                 case Arg::TypeID::TI_Char:      writer->write(&arg->valueOrArray.Char,1); break;
                 case Arg::TypeID::TI_Thread:    break;
                 case Arg::TypeID::TI_EpochNsec: break;
