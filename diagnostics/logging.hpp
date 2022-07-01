@@ -144,6 +144,7 @@ namespace internal {
         inline bool isEmpty() { return m_acquireIndex == m_releaseIndex; }
         inline TItem * acquire(uint32_t size)
         {
+            TItem * result = nullptr;
             uint32_t acquireIndex_old = m_acquireIndex;
             for (;;)
             {
@@ -153,22 +154,26 @@ namespace internal {
                 {
                     if (acquireIndex_new >= releaseIndex) continue;
                     if (m_acquireIndex.compare_exchange_weak(acquireIndex_old, acquireIndex_new) == false) continue;
-                    return m_buf + acquireIndex_old;
+                    result = m_buf + acquireIndex_old; break;
                 }
                 else // releaseIndex <= acquireIndex_old
                 {
                     if (acquireIndex_new < m_size) {
                         if (m_acquireIndex.compare_exchange_weak(acquireIndex_old, acquireIndex_new) == false) continue;
-                        return m_buf + acquireIndex_old;
+                        result = m_buf + acquireIndex_old; break;
                     } else {
                         m_actualSize.store(acquireIndex_old);
                         acquireIndex_new = size;
                         if (acquireIndex_new >= releaseIndex) continue;
                         if (m_acquireIndex.compare_exchange_weak(acquireIndex_old, acquireIndex_new) == false) continue;
-                        return m_buf;
+                        result = m_buf; break;
                     }
                 }
             }
+            TItem *end = result + size;
+            TItem *p = result;
+            while (p < end) new(p++) TItem{}; \
+            return result;
         }
         inline void release(uint32_t size)
         {
