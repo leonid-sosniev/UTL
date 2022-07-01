@@ -118,6 +118,78 @@ namespace {
             thread.join();
         }
     };
+
+    template<typename InputDataType> class ThreadPool {
+        struct WorkItem {
+            InputDataType input;
+            void(*func)(CancellationToken, InputDataType &);
+        };
+        using Worker = std::thread;
+        ConcurrentQueue<WorkItem> m_workItems;
+        std::condition_variable m_workersCVar;
+        std::mutex m_workersMutex;
+        std::vector<Worker> m_workers;
+        std::atomic<bool> m_stopAll;
+    public:
+        ~ThreadPool()
+        {
+            m_stopAll.store(true);
+            m_workersCVar.notify_all();
+            for (Worker & w : m_workers) w.join();
+        }
+        ThreadPool(uint32_t threadCount, uint32_t queueLength) : m_workItems(queueLength)
+        {
+            m_workers.reserve(threadCount);
+            for (uint32_t i = 0; i < threadCount; ++i) {
+                m_workers.emplace_back(&ThreadPool::threadMain, this);
+            }
+        }
+        void enqueueTask(
+                void(*func)(CancellationToken, const InputDataType &),
+                InputDataType && input)
+        {
+            auto thereIsWorkPending = !m_workItems.isEmpty();
+            while (m_workItems.tryEnqueue(WorkItem{ std::move(input), func }) == false) {
+                m_workersCVar.notify_one();
+            }
+            if (thereIsWorkPending) {
+                m_workersCVar.notify_one();
+            }
+        }
+        bool workIsPending() const {
+            return !m_workItems.isEmpty();
+        }
+    private:
+        void threadMain()
+        {
+            std::cout << "ThreadPool worker #" << std::this_thread::get_id() << std::endl;
+            CancellationToken token{m_stopAll};
+            WorkItem workItem;
+            std::function<bool()> wakeupCondition = [&]() {
+                if (token.isCancelled()) {
+                    return true;
+                } else {
+                    if (m_workItems.tryDequeue(workItem)) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                }
+            };
+
+            for (;;) {
+                {
+                    std::unique_lock<std::mutex> lock{m_workersMutex};
+                    m_workersCVar.wait(lock, wakeupCondition);
+                }
+                if (token.isCancelled()) {
+                    return;
+                } else {
+                    workItem.func(token, workItem.input);
+                }
+            }
+        }
+    };
 }
 
 class PlainTextEventFormatter : public AbstractEventFormatter {
