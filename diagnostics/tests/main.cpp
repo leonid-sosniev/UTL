@@ -87,6 +87,37 @@ namespace {
         if (num < 0) *--p = '-';
         return p;
     }
+
+    class CancellationToken {
+        std::atomic_bool & m_flag;
+    public:
+        CancellationToken(std::atomic_bool & flag) : m_flag(flag)
+        {}
+        bool isCancelled() const {
+            if (m_flag) {
+                return true;
+            } else {
+                return false;
+            }
+        }
+    };
+
+    class ThreadWorker {
+    private:
+        std::atomic_bool writerIsCancelled;
+        std::packaged_task<void(CancellationToken)> task;
+        std::thread thread;
+    public:
+        ThreadWorker(std::function<void(CancellationToken)> procedure)
+            : task(procedure)
+            , thread(std::move(task), CancellationToken{writerIsCancelled})
+            , writerIsCancelled(false)
+        {}
+        ~ThreadWorker() {
+            writerIsCancelled = true;
+            thread.join();
+        }
+    };
 }
 
 class PlainTextEventFormatter : public AbstractEventFormatter {
@@ -298,37 +329,6 @@ TEST_CASE("socket-based (inter-threaded)", "[validation]")
     th1.join();
     th2.join();
 }
-
-class CancellationToken {
-    std::atomic_bool & m_flag;
-public:
-    CancellationToken(std::atomic_bool & flag) : m_flag(flag)
-    {}
-    bool isCancelled() const {
-        if (m_flag) {
-            return true;
-        } else {
-            return false;
-        }
-    }
-};
-
-class ThreadWorker {
-private:
-    std::atomic_bool writerIsCancelled;
-    std::packaged_task<void(CancellationToken)> task;
-    std::thread thread;
-public:
-    ThreadWorker(std::function<void(CancellationToken)> procedure)
-        : task(procedure)
-        , thread(std::move(task), CancellationToken{writerIsCancelled})
-        , writerIsCancelled(false)
-    {}
-    ~ThreadWorker() {
-        writerIsCancelled = true;
-        thread.join();
-    }
-};
 
 TEST_CASE("InterThreadEventChannel benchmark", "[benchmark]")
 {
