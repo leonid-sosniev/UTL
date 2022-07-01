@@ -407,7 +407,7 @@ TEST_CASE("InterThreadEventChannel benchmark", "[benchmark]")
     unsigned bufferSize = 0;
     const char * name;
     DummyWriter wtr{};
-    DummyEventFormatter fmt{};
+    PlainTextEventFormatter fmt;
 
     SECTION("InterThreadEventChannel 1kB" ) {
         bufferSize = 1024;
