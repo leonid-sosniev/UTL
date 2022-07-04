@@ -442,6 +442,6 @@ TEST_CASE("InterThreadEventChannel benchmark", "[benchmark]")
         }
     };
     BENCHMARK(name) {
-        UTL_logev(chan, "this is some message to be logged here and consumed");
+        UTL_logev(chan, "this is some message to be logged here and consumed", -1, 'w', "some words", 0.56);
     };
 }
