@@ -567,6 +567,58 @@ namespace
         #undef OCCU_MARK
     };
 
+    class InterThreadTelemetryChannel final : public AbstractTelemetryChannel {
+    private:
+        ExposedBuffer m_buffer;
+        Arg::TypeID * m_fmtPtr;
+        uint16_t m_fmtLen;
+        std::atomic_flag m_sync;
+    public:
+        InterThreadTelemetryChannel(AbstractTelemetryFormatter & formatter, AbstractWriter & sink, uint32_t bufferSize)
+            : AbstractTelemetryChannel(formatter, sink)
+            , m_buffer(bufferSize)
+            , m_fmtPtr(nullptr)
+            , m_fmtLen(0)
+        {}
+        [[nodiscard]] bool tryProcessSample() final override {
+            auto size = sizeof(Arg) * m_fmtLen;
+            auto args = (Arg*) m_buffer.tryExposeReceivedContiguousBlock(size);
+            if (!args) {
+                return false;
+            }
+
+            for (auto end=args+m_fmtLen, arg=args; args < end; ++arg)
+            {
+                if (bool(arg->type & Arg::TypeID::__ISARRAY))
+                {
+                    until (arg->valueOrArray.ArrayPointer = m_buffer.tryExposeReceivedContiguousBlock(Arg::typeSize(arg->type) * arg->arrayLength)) {}
+                }
+            }
+            m_formatter.formatValues(this->m_sink, m_fmtLen, args);
+            m_buffer.clearExposed();
+            return true;
+        }
+    private:
+        void sendSampleTypes_(uint16_t sampleLength, const Arg::TypeID sampleTypes[]) final override {
+            if (m_fmtPtr) {
+                throw std::logic_error{ "sendSampleTypes() is supposed to be called only once before all sendSampple() calls. " };
+            }
+            m_fmtPtr = new Arg::TypeID[sampleLength];
+            m_fmtLen = sampleLength;
+            std::memcpy(m_fmtPtr, sampleTypes, m_fmtLen);
+            m_formatter.formatExpectedTypes(this->m_sink, m_fmtLen, m_fmtPtr);
+        }
+        void sendSample_(const Arg values[]) final override {
+            m_buffer.write(values, m_fmtLen);
+            auto end = values + m_fmtLen;
+            for (const Arg * p = values; p < end; ++p) {
+                if (bool(p->type & Arg::TypeID::__ISARRAY)) {
+                    m_buffer.write(p->valueOrArray.ArrayPointer, Arg::typeSize(p->type) * p->arrayLength);
+                }
+            }
+        }
+    };
+
 #undef until
 
 } // namespace logging
