@@ -220,20 +220,25 @@ namespace internal {
     protected:
         AbstractEventFormatter & m_formatter;
         AbstractWriter & m_writer;
+        internal::LocklessCircularAllocator<Arg> m_argsAllocator;
     public:
         AbstractEventChannel & operator=(const AbstractEventChannel &) = delete;
         AbstractEventChannel & operator=(AbstractEventChannel &&) = delete;
         AbstractEventChannel(const AbstractEventChannel &) = delete;
         AbstractEventChannel(AbstractEventChannel &&) = delete;
     public:
-        AbstractEventChannel(AbstractEventFormatter & formatter, AbstractWriter & writer)
+        AbstractEventChannel(AbstractEventFormatter & formatter, AbstractWriter & writer, uint32_t eventArgsBufferSize)
             : m_formatter(formatter)
             , m_writer(writer)
+            , m_argsAllocator(eventArgsBufferSize)
         {}
         virtual ~AbstractEventChannel() {}
         virtual bool tryReceiveAndProcessEvent() = 0;
         inline void sendEventAttributes(const EventAttributes & attr) { sendEventAttributes_(attr); }
         inline void sendEventOccurrence(const EventAttributes & attr, const Arg args[]) { sendEventOccurrence_(attr, args); }
+        Arg * allocateArgs(uint32_t count) { return m_argsAllocator.acquire(count); }
+    protected:
+        void releaseArgs(uint32_t count) { m_argsAllocator.release(count); }
     private:
         virtual void sendEventAttributes_(const EventAttributes & attr) = 0;
         virtual void sendEventOccurrence_(const EventAttributes & attr, const Arg args[]) = 0;
@@ -322,8 +327,8 @@ namespace {
     >
     inline void logEvent(TEventChannel & channel, const EventAttributes & attributes, Ts &&... args)
     {
-        Arg argBuf[sizeof...(args) + 1];
-        logEvent_sfinae(&argBuf[0], std::forward<Ts&&>(args)...);
+        Arg * argBuf = channel.AbstractEventChannel::allocateArgs(sizeof...(Ts));
+        logEvent_sfinae(argBuf, std::forward<Ts&&>(args)...);
         channel.AbstractEventChannel::sendEventOccurrence(attributes, argBuf);
     }
 
