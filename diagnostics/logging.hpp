@@ -116,6 +116,90 @@ namespace _utl { namespace logging {
     };
     std::atomic<uint32_t> EventAttributes::ID_COUNTER{1};
 
+namespace internal {
+
+    template<typename TItem> class LocklessCircularAllocator {
+    private:
+        std::atomic<uint32_t> m_actualSize;
+        std::atomic<uint32_t> m_acquireIndex;
+        std::atomic<uint32_t> m_releaseIndex;
+        uint32_t const m_size;
+        TItem * const m_buf;
+    public:
+        ~LocklessCircularAllocator() {
+            delete[] m_buf;
+        }
+        LocklessCircularAllocator(uint32_t size)
+            : m_buf(new TItem[size])
+            , m_size(size)
+            , m_actualSize(size)
+            , m_acquireIndex(0)
+            , m_releaseIndex(0)
+        {}
+        LocklessCircularAllocator(const LocklessCircularAllocator &) = delete;
+        LocklessCircularAllocator(LocklessCircularAllocator &&) = delete;
+        LocklessCircularAllocator & operator=(const LocklessCircularAllocator &) = delete;
+        LocklessCircularAllocator & operator=(LocklessCircularAllocator &&) = delete;
+
+        inline TItem * acquire(uint32_t size)
+        {
+            uint32_t acquireIndex_old = m_acquireIndex;
+            for (;;)
+            {
+                register uint32_t releaseIndex = m_releaseIndex;
+                register uint32_t acquireIndex_new = acquireIndex_old + size;
+                if (acquireIndex_old < releaseIndex)
+                {
+                    if (acquireIndex_new >= releaseIndex) continue;
+                    if (m_acquireIndex.compare_exchange_weak(acquireIndex_old, acquireIndex_new) == false) continue;
+                    return m_buf + acquireIndex_old;
+                }
+                else // releaseIndex <= acquireIndex_old
+                {
+                    if (acquireIndex_new < m_size) {
+                        if (m_acquireIndex.compare_exchange_weak(acquireIndex_old, acquireIndex_new) == false) continue;
+                        return m_buf + acquireIndex_old;
+                    } else {
+                        m_actualSize.store(acquireIndex_old);
+                        acquireIndex_new = size;
+                        if (acquireIndex_new >= releaseIndex) continue;
+                        if (m_acquireIndex.compare_exchange_weak(acquireIndex_old, acquireIndex_new) == false) continue;
+                        return m_buf;
+                    }
+                }
+            }
+        }
+        inline void release(uint32_t size)
+        {
+            uint32_t releaseIndex_old = m_releaseIndex;
+            for (;;)
+            {
+                register uint32_t acquireIndex = m_acquireIndex;
+                register uint32_t releaseIndex_new = releaseIndex_old + size;
+                if (releaseIndex_old <= acquireIndex)
+                {
+                    if (releaseIndex_new > acquireIndex) continue;
+                    if (m_releaseIndex.compare_exchange_weak(releaseIndex_old, releaseIndex_new) == false) continue;
+                    return;
+                }
+                else // acquireIndex < releaseIndex_old
+                {
+                    if (releaseIndex_new < m_actualSize) {
+                        if (m_releaseIndex.compare_exchange_weak(releaseIndex_old, releaseIndex_new) == false) continue;
+                        return;
+                    } else {
+                        releaseIndex_new = size;
+                        if (releaseIndex_new > acquireIndex) continue;
+                        if (m_releaseIndex.compare_exchange_weak(releaseIndex_old, releaseIndex_new) == false) continue;
+                        return;
+                    }
+                }
+            }
+        }
+    };
+
+}
+
     class AbstractEventFormatter {
     public:
         virtual ~AbstractEventFormatter() {}
