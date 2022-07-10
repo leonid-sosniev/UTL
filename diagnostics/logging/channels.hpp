@@ -486,5 +486,88 @@ namespace
         }
     };
 
+#define until(cond) while(!(cond))
+
+    class InterThreadEventChannel final : public AbstractEventChannel {
+    private:
+#define ATTR_MARK       "Attribut"
+#define OCCU_MARK       "Occurren"
+        ExposedBuffer m_buffer;
+    public:
+        InterThreadEventChannel(AbstractEventFormatter & formatter, AbstractWriter & writer, size_t bufferSize)
+            : AbstractEventChannel(formatter,writer)
+            , m_buffer(bufferSize)
+        {}
+        bool tryReceiveAndProcessEvent() final override
+        {
+            char *mark = (char*) m_buffer.tryExposeReceivedContiguousBlock(sizeof(void*));
+            if (!mark) {
+                return false;
+            }
+
+            EventAttributes * attrsP;
+            m_buffer.read(&attrsP, sizeof(EventAttributes *));
+
+            if (std::memcmp(mark,ATTR_MARK,sizeof(void*)) == 0) {
+                m_formatter.formatEventAttributes(m_writer, *attrsP);
+                m_buffer.read(mark, sizeof(void*));
+                m_buffer.read(&attrsP, sizeof(EventAttributes *));
+            }
+            if (std::memcmp(mark,OCCU_MARK,sizeof(void*)) /*not zero*/) {
+                std::stringstream msg;
+                msg << "InterThreadEventChannel: corrupted data (item signature is missing). The read bytes are: [";
+                for (int i = 0; i < sizeof(void*); ++i) {
+                    msg << ' ' << std::hex << std::setw(2) << (unsigned) mark[i];
+                }
+                msg << std::dec << std::setw(0);
+                msg << " ] = \"";
+                msg.write(mark, sizeof(void*));
+                msg << "\"";
+                throw std::runtime_error{ msg.str() };
+            }
+            Arg * argsP;
+            until (argsP = (Arg*) m_buffer.tryExposeReceivedContiguousBlock(sizeof(Arg) * attrsP->argumentsExpected)) {}
+
+            auto end = argsP + attrsP->argumentsExpected;
+            for (auto arg = argsP; arg < end; ++arg)
+            {
+                if (bool(arg->type & Arg::TypeID::__ISARRAY))
+                {
+                    const char * p;
+                    until (p = (const char *) m_buffer.tryExposeReceivedContiguousBlock(Arg::typeSize(arg->type) * arg->arrayLength))
+                    {}
+                    arg->valueOrArray.ArrayPointer = p;
+                }
+            }
+            m_formatter.formatEvent(m_writer, *attrsP, argsP);
+            m_buffer.clearExposed();
+            return true;
+        }
+    private:
+        void sendEventAttributes_(const EventAttributes & attr) final override {
+            auto attrP = &attr;
+            m_buffer.write(ATTR_MARK, sizeof(void*));
+            m_buffer.write(&attrP, sizeof(attrP));
+        }
+        void sendEventOccurrence_(const EventAttributes & attr, const Arg args[]) final override {
+            auto attrP = &attr;
+            m_buffer.write(OCCU_MARK, sizeof(void*));
+            m_buffer.write(&attrP, sizeof(attrP));
+            m_buffer.write(args, sizeof(Arg) * attrP->argumentsExpected);
+            auto argsEnd = args + attr.argumentsExpected;
+            for (auto p = args; p < argsEnd; ++p)
+            {
+                bool isArray = bool(p->type & Arg::TypeID::__ISARRAY);
+                if (isArray) {
+                    m_buffer.write(p->valueOrArray.ArrayPointer, Arg::typeSize(p->type) * p->arrayLength);
+                }
+            }
+        }
+        #undef ATTR_MARK
+        #undef OCCU_MARK
+    };
+
+#undef until
+
 } // namespace logging
 } // namespace _utl
