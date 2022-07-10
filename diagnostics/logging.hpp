@@ -247,20 +247,25 @@ namespace internal {
     protected:
         AbstractTelemetryFormatter & m_formatter;
         AbstractWriter & m_sink;
+        internal::LocklessCircularAllocator<Arg> m_argsAllocator;
     public:
-        AbstractTelemetryChannel(AbstractTelemetryFormatter & formatter, AbstractWriter & sink)
+        AbstractTelemetryChannel(AbstractTelemetryFormatter & formatter, AbstractWriter & sink, uint32_t eventArgsBufferSize)
             : m_formatter(formatter)
             , m_sink(sink)
+            , m_argsAllocator(eventArgsBufferSize)
         {}
         virtual bool tryProcessSample() = 0;
-    private:
-        template<class T1, class T2> friend class TelemetryLogger;
+        Arg * allocateArgs(uint32_t count) { return m_argsAllocator.acquire(count); }
+    protected:
+        void releaseArgs(uint32_t count) { m_argsAllocator.release(count); }
+    public:
         void sendSampleTypes(uint16_t sampleLength, const Arg::TypeID sampleTypes[]) {
             sendSampleTypes_(sampleLength, sampleTypes);
         }
         void sendSample(const Arg values[]) {
             sendSample_(values);
         }
+    private:
         virtual void sendSampleTypes_(uint16_t sampleLength, const Arg::TypeID sampleTypes[]) = 0;
         virtual void sendSample_(const Arg values[]) = 0;
     };
