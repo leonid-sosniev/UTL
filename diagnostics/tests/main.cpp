@@ -150,7 +150,7 @@ TEST_CASE("smoke sequential", "[validation]")
 
     RawEventFormatter fmt{};
     FlatBufferWriter wtr{ buf.data(), buf.size() };
-    InterThreadEventChannel chan{ fmt, wtr, 300 };
+    InterThreadEventChannel chan{ fmt, wtr, 64, 300 };
 
     // all data fits in the buffer
     auto p_1 = (char*) wtr.position();
@@ -172,7 +172,7 @@ TEST_CASE("local inter-threaded", "[validation]")
 
     RawEventFormatter fmt{};
     FlatBufferWriter wtr{ buf.data(), buf.size() };
-    InterThreadEventChannel chan{ fmt, wtr, 128 }; // -- too small to store two events -- only one at a time
+    InterThreadEventChannel chan{ fmt, wtr, 16, 128 }; // -- too small to store two events -- only one at a time
     std::packaged_task<void()> reader{
         [&wtr,&chan]() {
             try {
@@ -285,7 +285,7 @@ TEST_CASE("InterThreadEventChannel benchmark", "[benchmark]")
         bufferSize = 16*1024*1024;
         name = "InterThreadEventChannel 16MB";
     }
-    InterThreadEventChannel chan{ fmt, wtr, bufferSize };
+    InterThreadEventChannel chan{ fmt, wtr, 1024, bufferSize };
     ThreadWorker<InterThreadEventChannel> C{chan};
     BENCHMARK(name) {
         UTL_logev(chan, "this is some message to be logged here and consumed");

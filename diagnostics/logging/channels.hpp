@@ -431,8 +431,8 @@ namespace
         };
         ConcurrentQueue<Trace> m_eventQueue;
     public:
-        InterThreadEventChannel(AbstractEventFormatter & formatter, AbstractWriter & writer, uint32_t bufferSize)
-            : AbstractEventChannel(formatter, writer)
+        InterThreadEventChannel(AbstractEventFormatter & formatter, AbstractWriter & writer, uint32_t argsAllocatorCapacity, uint32_t bufferSize)
+            : AbstractEventChannel(formatter, writer, argsAllocatorCapacity)
             , m_eventQueue(bufferSize / sizeof(Trace))
         {}
         bool tryReceiveAndProcessEvent() final override
@@ -442,6 +442,7 @@ namespace
                 m_formatter.formatEventAttributes(m_writer, *trace.attrs);
             } else {
                 m_formatter.formatEvent(m_writer, *trace.attrs, trace.args);
+                releaseArgs(trace.attrs->argumentsExpected);
             }
             return true;
         }
