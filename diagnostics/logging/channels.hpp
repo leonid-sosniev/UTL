@@ -293,32 +293,32 @@ namespace
 #endif
         }
     public:
-        WebEventChannel(AbstractEventFormatter & formatter, AbstractWriter & writer, SocketHandle hdl)
-            : AbstractEventChannel(formatter, writer)
+        WebEventChannel(uint32_t argsAllocatorCapacity, AbstractEventFormatter & formatter, AbstractWriter & writer, SocketHandle hdl)
+            : AbstractEventChannel(formatter, writer, argsAllocatorCapacity)
             , m_hdl(std::move(hdl))
         {}
         ~WebEventChannel()
         {}
-        static std::unique_ptr<WebEventChannel> createSender(uint16_t port, uint32_t ipAddr)
+        static std::unique_ptr<WebEventChannel> createSender(uint32_t argsAllocatorCapacity, uint16_t port, uint32_t ipAddr)
         {
             static NullEventFormatter fmt;
             static NullWriter wtr;
             auto sock = os_createSender(port, ipAddr);
-            auto p = new WebEventChannel{fmt, wtr, std::move(sock)};
+            auto p = new WebEventChannel{argsAllocatorCapacity, fmt, wtr, std::move(sock)};
             std::unique_ptr<WebEventChannel> web{p};
             return std::move(web);
         }
         static std::unique_ptr<WebEventChannel> createReceiver(AbstractEventFormatter & formatter, AbstractWriter & writer, uint16_t port, uint32_t ipAddr)
         {
             auto sock = os_createReceiver(port, ipAddr);
-            auto p = new WebEventChannel{formatter, writer, std::move(sock)};
+            auto p = new WebEventChannel{0, formatter, writer, std::move(sock)};
             std::unique_ptr<WebEventChannel> web{p};
             return std::move(web);
         }
-        static std::unique_ptr<WebEventChannel> createSender(uint16_t port, const uint8_t (&ipAddr)[4])
+        static std::unique_ptr<WebEventChannel> createSender(uint32_t argsAllocatorCapacity, uint16_t port, const uint8_t (&ipAddr)[4])
         {
             return std::move(
-                createSender(port, ipAddr[0] | (ipAddr[1] << 8) | (ipAddr[2] << 16) | (ipAddr[3] << 24))
+                createSender(argsAllocatorCapacity, port, ipAddr[0] | (ipAddr[1] << 8) | (ipAddr[2] << 16) | (ipAddr[3] << 24))
             );
         }
         static std::unique_ptr<WebEventChannel> createReceiver(AbstractEventFormatter & formatter, AbstractWriter & writer, uint16_t port, const uint8_t (&ipAddr)[4])
@@ -419,6 +419,7 @@ namespace
                     os_write(args[i].valueOrArray.ArrayPointer, Arg::typeSize(args[i].type) * args[i].arrayLength);
                 }
             }
+            releaseArgs(attr.argumentsExpected);
         }
     };
 

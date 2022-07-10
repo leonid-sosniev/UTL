@@ -210,7 +210,7 @@ TEST_CASE("socket-based (inter-threaded)", "[validation]")
     std::packaged_task<void()> sender{
         []() {
             std::this_thread::sleep_for(std::chrono::seconds{10});
-            auto wchan = WebEventChannel::createSender(12345, { 127, 0, 0, 1 });
+            auto wchan = WebEventChannel::createSender(1024, 12345, { 127, 0, 0, 1 });
             for (int i = 0; i < 2; ++i) {
                 UTL_logev(*wchan, "1234567890-", 1u, -1, 0.2, '3', strArr[i]);
             }
