@@ -12,6 +12,15 @@
     ],
     "configurations": [
         {
+            "name": "lldb",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/release/${input:ExeName}",
+            "args": [],
+            "cwd": "${workspaceFolder}/release",
+            "miDebuggerPath": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\Llvm\\x64\\bin\\clangd.exe",
+        },
+        {
             "name": "cppDebug",
             "type": "cppdbg",
             "request": "launch",
