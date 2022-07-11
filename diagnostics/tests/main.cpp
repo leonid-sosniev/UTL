@@ -238,6 +238,30 @@ TEST_CASE("socket-based (inter-threaded)", "[validation]")
     th2.join();
 }
 
+template<typename TChannel> class ThreadWorker {
+    std::atomic_bool writerIsRunning;
+    std::packaged_task<void()> task;
+    std::thread thread;
+public:
+    ThreadWorker(TChannel & chan)
+        : task([&]() {
+            try {
+                while (chan.tryReceiveAndProcessEvent() || writerIsRunning) {}
+            }
+            catch (std::exception & exc) {
+                std::cout << exc.what() << std::endl;
+            }
+            catch (...) {}
+        })
+        , thread(std::move(task))
+        , writerIsRunning(true)
+    {}
+    ~ThreadWorker() {
+        writerIsRunning = false;
+        thread.join();
+    }
+};
+
 template <typename TLogger, typename TChannel> void loggerConsumerBenchmark(TLogger &log, TChannel &chan)
 {
     std::atomic_bool writerIsRunning{true};
