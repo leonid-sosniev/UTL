@@ -7,6 +7,11 @@
     "C_Cpp.autocomplete": "Default",
     "C_Cpp.configurationWarnings": "Enabled",
     "C_Cpp.intelliSenseEngine": "Default",
-    "C_Cpp.default.cStandard": "c99",
-    "C_Cpp.default.cppStandard": "c++11"
+    "C_Cpp.default.cStandard": "c11",
+    "C_Cpp.default.cppStandard": "c++14",
+    "terminal.integrated.scrollback": 99999,
+    "lldb.displayFormat": "auto",
+    "lldb.showDisassembly": "never",
+    "lldb.dereferencePointers": true,
+    "lldb.consoleMode": "commands",
 }
