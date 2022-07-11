@@ -21,10 +21,10 @@
             "command": "python",
             "args": [
                 "build.py",
-                "-i", "/usr/local/include,/usr/local/include/,${workspaceFolder}/..",
-                "${workspaceFolder}/${input:Dir}/**/*.cpp ",
-                "${workspaceFolder}/release/",
-                "${input:ExeName}"
+                "-i", "\"/usr/local/include,/usr/local/include/,${workspaceFolder}/..\"",
+                "\"${workspaceFolder}/${input:Dir}/**/*.cpp\"",
+                "\"${workspaceFolder}/release/\"",
+                "\"${input:ExeName}\""
             ],
             "group": "build",
             "problemMatcher": []
