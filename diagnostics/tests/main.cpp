@@ -234,26 +234,33 @@ TEST_CASE("socket-based (inter-threaded)", "[validation]")
     th2.join();
 }
 
-template<typename TChannel> class ThreadWorker {
-    std::atomic_bool writerIsRunning;
-    std::packaged_task<void()> task;
+class CancellationToken {
+    std::atomic_bool & m_flag;
+public:
+    CancellationToken(std::atomic_bool & flag) : m_flag(flag)
+    {}
+    bool isCancelled() const {
+        if (m_flag) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+};
+
+class ThreadWorker {
+private:
+    std::atomic_bool writerIsCancelled;
+    std::packaged_task<void(CancellationToken)> task;
     std::thread thread;
 public:
-    ThreadWorker(TChannel & chan)
-        : task([&]() {
-            try {
-                while (chan.tryReceiveAndProcessEvent() || writerIsRunning) {}
-            }
-            catch (std::exception & exc) {
-                std::cout << exc.what() << std::endl;
-            }
-            catch (...) {}
-        })
-        , thread(std::move(task))
-        , writerIsRunning(true)
+    ThreadWorker(std::function<void(CancellationToken)> procedure)
+        : task(procedure)
+        , thread(std::move(task), CancellationToken{writerIsCancelled})
+        , writerIsCancelled(false)
     {}
     ~ThreadWorker() {
-        writerIsRunning = false;
+        writerIsCancelled = true;
         thread.join();
     }
 };
@@ -286,7 +293,17 @@ TEST_CASE("InterThreadEventChannel benchmark", "[benchmark]")
         name = "InterThreadEventChannel 16MB";
     }
     InterThreadEventChannel chan{ fmt, wtr, 1024, bufferSize };
-    ThreadWorker<InterThreadEventChannel> C{chan};
+    ThreadWorker C{
+        [&chan](CancellationToken token) {
+            try {
+                while (chan.tryReceiveAndProcessEvent() || !token.isCancelled()) {}
+            }
+            catch (std::exception & exc) {
+                std::cout << exc.what() << std::endl;
+            }
+            catch (...) {}
+        }
+    };
     BENCHMARK(name) {
         UTL_logev(chan, "this is some message to be logged here and consumed");
     };
