@@ -25,14 +25,14 @@ namespace _utl
 
     class DummyWriter : public AbstractWriter {
     public:
-        virtual uint32_t write(const void * data, uint32_t size) override { (void) data; (void) size; return size; }
-        virtual bool flush() override { return true; }
+        virtual uint32_t write(const void * data, uint32_t size) final override { (void) data; (void) size; return size; }
+        virtual bool flush() final override { return true; }
     };
 
     class NullWriter : public AbstractWriter {
     public:
-        uint32_t write(const void * data, uint32_t size) override { std::abort(); (void) data; (void) size; return 0; }
-        bool flush() override { std::abort(); return false; }
+        virtual uint32_t write(const void *, uint32_t) final override { std::abort(); (void) data; (void) size; return 0; }
+        virtual bool flush() final override { std::abort(); return false; }
     };
 
 }
