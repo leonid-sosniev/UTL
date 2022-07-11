@@ -1,6 +1,17 @@
 {
     "configurations": [
         {
+            "name": "Windows-clang",
+            "cppStandard": "c++14",
+            "cStandard": "c11",
+            "compilerPath": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\Llvm\\x64\\bin\\clang++.exe",
+            "includePath": [
+                "${workspaceFolder}/../",
+                "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC\\14.31.31103\\include"
+            ],
+            "intelliSenseMode": "windows-clang-x64"
+        },
+        {
             "name": "Linux",
             "includePath": [
                 "/usr/include/",
