@@ -105,11 +105,16 @@ namespace _utl { namespace logging {
     }
 
     struct EventAttributes {
+    private:
+        static std::atomic<uint32_t> ID_COUNTER;
+    public:
+        static EventID getNewEventID() { return ID_COUNTER.fetch_add(1); }
         const Str messageFormat, function, file;
         const EventID id;
         const uint32_t line;
-        const uint16_t argumentsExpected;
+        const size_t argumentsExpected; // must be size_t or else getting it at compile-time fails
     };
+    std::atomic<uint32_t> EventAttributes::ID_COUNTER{1};
 
     class AbstractEventFormatter {
     public:
@@ -228,15 +233,12 @@ namespace {
     public:
         EventLogger(TEventChannel & conduit) : m_wtr(conduit)
         {}
-        EventID registerEvent(const Str & msgFmt, const Str & func, const Str & file, uint32_t line, uint16_t argCnt, EventAttributes * out_attr)
+        inline const EventID registerEvent(const EventAttributes & attr)
         {
-            static volatile EventID ID = 0;
-            new(out_attr) EventAttributes{ msgFmt, func, file, ++ID, line, argCnt };
-
-            m_wtr.AbstractEventChannel::sendEventAttributes(*out_attr);
-            return out_attr->id;
+            m_wtr.AbstractEventChannel::sendEventAttributes(attr);
+            return attr.id;
         }
-        void logEvent(const EventAttributes & attr, const Arg args[])
+        inline void logEvent(const EventAttributes & attr, const Arg args[])
         {
             m_wtr.AbstractEventChannel::sendEventOccurrence(attr, args);
         }
@@ -290,18 +292,16 @@ namespace {
     template<class...T> constexpr inline size_t count_of(T &&... items) { return sizeof...(items); }
 }
     #define UTL_logev(CHANNEL, MESSAGE, ...) { \
-        static uint8_t cpd[sizeof(_utl::logging::EventAttributes)]; \
-        static _utl::logging::EventID purposed_to_call_registerEvent_once = (CHANNEL).registerEvent( \
+        static _utl::logging::EventAttributes cpd{ \
             _utl::logging::Str::create(MESSAGE), \
             _utl::logging::Str::create(__FUNCTION__), \
             _utl::logging::Str::create(_utl::logging::getCharAfterLastSlash(__FILE__)), \
+            _utl::logging::EventAttributes::getNewEventID(), \
             __LINE__, \
-            _utl::logging::count_of(__VA_ARGS__), \
-            reinterpret_cast<_utl::logging::EventAttributes*>(cpd) \
-        ); \
-        logEvent(\
-            (CHANNEL), *reinterpret_cast<const _utl::logging::EventAttributes*>(cpd),##__VA_ARGS__\
-        ); \
+            _utl::logging::count_of(__VA_ARGS__) \
+        }; \
+        static auto purposed_to_call_registerEvent_once = CHANNEL.registerEvent(cpd); \
+        _utl::logging::logEvent(CHANNEL,cpd,##__VA_ARGS__); \
     }
 
 } // logging
