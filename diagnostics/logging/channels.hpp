@@ -75,18 +75,6 @@ namespace
         ~NullWriter() final override {}
     };
 
-    class AtomicLock {
-        volatile std::atomic_flag & flag;
-    public:
-        AtomicLock(volatile std::atomic_flag &f) : flag(f)
-        {
-            while (flag.test_and_set()) {}
-        }
-        ~AtomicLock() {
-            flag.clear();
-        }
-    };
-
     template<typename TItem> class ConcurrentQueue {
         std::atomic<uint32_t> m_usedCount;
         std::atomic<uint32_t> m_pushIndex;
