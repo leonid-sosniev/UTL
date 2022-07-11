@@ -262,57 +262,37 @@ public:
     }
 };
 
-template <typename TLogger, typename TChannel> void loggerConsumerBenchmark(TLogger &log, TChannel &chan)
-{
-    std::atomic_bool writerIsRunning{true};
-
-    std::packaged_task<void()> P_task{
-        [&]() {
-            try {
-                while (chan.tryReceiveAndProcessEvent() || writerIsRunning) {}
-            }
-            catch (std::exception & exc) {
-                std::cout << exc.what() << std::endl;
-            }
-            catch (...) {}
-        }
-    };
-    auto P_ret = P_task.get_future();
-    std::thread P_thread{ std::move(P_task) };
-    
-    auto I = ch::system_clock::now();
-    for (unsigned i = 0; i < 1000'000; ++i)
-    {
-        UTL_logev(log, "this is some message to be logged here and consumed in another thread");
-    }
-    std::cout << std::chrono::duration_cast<ch::milliseconds>(ch::system_clock::now() - I).count() << " msec" << std::endl;
-
-    writerIsRunning.store(false);
-    P_thread.join();
-}
 TEST_CASE("InterThreadEventChannel benchmark", "[benchmark]")
 {
+    unsigned bufferSize = 0;
+    const char * name;
     DummyWriter wtr{};
     DummyEventFormatter fmt{};
 
-    SECTION("InterThreadEventChannel 1kB") {
-        InterThreadEventChannel chan{ fmt, wtr, 1024 };
-        EventLogger<InterThreadEventChannel> log{ chan };
-        loggerConsumerBenchmark(log, chan);
+    SECTION("InterThreadEventChannel 1kB" ) {
+        bufferSize = 1024;
+        name = "InterThreadEventChannel 1kB" ;
     }
     SECTION("InterThreadEventChannel 16kB") {
-        InterThreadEventChannel chan{ fmt, wtr, 16384 };
-        EventLogger<InterThreadEventChannel> log{ chan };
-        loggerConsumerBenchmark(log, chan);
+        bufferSize = 16384;
+        name = "InterThreadEventChannel 16kB";
     }
     SECTION("InterThreadEventChannel 64kB") {
-        InterThreadEventChannel chan{ fmt, wtr, 65536 };
-        EventLogger<InterThreadEventChannel> log{ chan };
-        loggerConsumerBenchmark(log, chan);
+        bufferSize = 65536;
+        name = "InterThreadEventChannel 64kB";
     }
-    SECTION("InterThreadEventChannel 1MB") {
-        InterThreadEventChannel chan{ fmt, wtr, 1024*1024 };
-        EventLogger<InterThreadEventChannel> log{ chan };
-        loggerConsumerBenchmark(log, chan);
+    SECTION("InterThreadEventChannel 1MB" ) {
+        bufferSize = 1024*1024;
+        name = "InterThreadEventChannel 1MB" ;
     }
+    SECTION("InterThreadEventChannel 16MB") {
+        bufferSize = 16*1024*1024;
+        name = "InterThreadEventChannel 16MB";
+    }
+    InterThreadEventChannel chan{ fmt, wtr, bufferSize };
+    EventLogger<InterThreadEventChannel> log{ chan };
+    ThreadWorker<InterThreadEventChannel> C{chan};
+    BENCHMARK(name) {
+        UTL_logev(log, "this is some message to be logged here and consumed");
+    };
 }
