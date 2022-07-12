@@ -472,7 +472,8 @@ namespace
             , m_sampleLen(0)
         {}
         [[nodiscard]] bool tryProcessSample() final override {
-            auto args = (Arg*) m_queue.dequeue();
+            const Arg * args;
+            if (!m_queue.tryDequeue(args)) return false;
             m_formatter.formatValues(this->m_sink, m_sampleLen, args);
             releaseArgs(m_sampleLen);
             return true;
