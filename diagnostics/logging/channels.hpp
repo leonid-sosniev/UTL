@@ -442,7 +442,8 @@ namespace
         {}
         bool tryReceiveAndProcessEvent() final override
         {
-            Trace trace = std::move(m_eventQueue.dequeue());
+            Trace trace;
+            if (!m_eventQueue.tryDequeue(trace)) return false;
             if (!trace.args) {
                 m_formatter.formatEventAttributes(m_writer, *trace.attrs);
             } else {
