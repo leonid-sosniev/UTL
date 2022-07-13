@@ -7,7 +7,6 @@
 #include <cstdlib>
 #include <cstring>
 
-#include <atomic>
 #include <chrono>
 #include <iostream>
 #include <memory>
@@ -110,71 +109,49 @@ namespace _utl { namespace logging {
         virtual void formatValues(AbstractWriter & wtr, uint16_t count, const Arg arg[]) = 0;
     };
 
-    class TelemetryLogger {
-        std::unique_ptr<AbstractWriter> m_source;
-    public:
-        TelemetryLogger(std::unique_ptr<AbstractWriter> ptr, uint16_t formatLength, Arg::TypeID sampleFormat[]) : m_source(std::move(ptr))
-        {
-            m_source->write(&formatLength, sizeof(formatLength));
-            m_source->write(&sampleFormat[0], sizeof(Arg) * formatLength);
-            m_source->write("telemetr", 8);
-        }
-        void logSample(const Arg args[])
-        {
-            m_source->write(&args[0], sizeof(Arg) * attr->argumentsExpected);
-        }
-    };
-    class AbstractTelemetryConsumer {
-    private:
-        static const uint16_t FMT_CACHE_LEN = 32;
-        std::unique_ptr<AbstractReader> m_source;
-        std::unique_ptr<AbstractTelemetryFormatter> m_formatter;
-        std::unique_ptr<AbstractWriter> m_sink;
-        uint16_t m_fmtLen;
-        Arg::TypeID * m_fmtPtr;
-        Arg         * m_argPtr;
-        Arg::TypeID   m_fmtCch[FMT_CACHE_LEN];
-        Arg           m_argCch[FMT_CACHE_LEN];
-    public:
-        ~AbstractTelemetryConsumer() {
-            delete[] (m_fmtPtr == m_fmtCch) ? nullptr : m_fmtPtr;
-            delete[] (m_argPtr == m_argCch) ? nullptr : m_argPtr;
-        }
-        AbstractTelemetryConsumer(
-                std::unique_ptr<AbstractReader> source,
-                std::unique_ptr<AbstractTelemetryFormatter> formatter,
-                std::unique_ptr<AbstractWriter> sink)
-            : m_source(std::move(source))
-            , m_formatter(std::move(formatter))
-            , m_sink(std::move(sink))
-        {
-            char spec[8];
-            m_source->read(&m_fmtLen, sizeof(m_fmtLen));
-            m_fmtPtr = (m_fmtLen <= FMT_CACHE_LEN) ? m_fmtCch : new Arg::TypeID[m_fmtLen],
-            m_argPtr = (m_fmtLen <= FMT_CACHE_LEN) ? m_argCch : new Arg[m_fmtLen],
-            m_source->read(m_fmtPtr, sizeof(Arg::TypeID) * m_fmtLen);
-            m_source->read(&spec[0], 8);
-            if (std::memcmp("telemetr", spec) != 0) {
-                throw std::runtime_error{"The mark left by a TelemetryLogger not found - the data is corrupted or has wrong format"};
-            }
-        }
-        virtual bool processSample() = 0;
+    class AbstractEventChannel {
     protected:
-        inline Arg::TypeID* sampleFormat() const {
-            return m_fmtPtr;
+        AbstractEventFormatter & m_formatter;
+        AbstractWriter & m_writer;
+    public:
+        AbstractEventChannel & operator=(const AbstractEventChannel &) = delete;
+        AbstractEventChannel & operator=(AbstractEventChannel &&) = delete;
+        AbstractEventChannel(const AbstractEventChannel &) = delete;
+        AbstractEventChannel(AbstractEventChannel &&) = delete;
+    public:
+        AbstractEventChannel(AbstractEventFormatter & formatter, AbstractWriter & writer)
+            : m_formatter(formatter)
+            , m_writer(writer)
+        {}
+        virtual ~AbstractEventChannel() {}
+        virtual bool tryReceiveAndProcessEvent() = 0;
+    private:
+        template<class,class> friend class EventLogger;
+        inline void sendEventAttributes(const EventAttributes & attr) { sendEventAttributes_(attr); }
+        inline void sendEventOccurrence(const EventAttributes & attr, const Arg args[]) { sendEventOccurrence_(attr, args); }
+        virtual void sendEventAttributes_(const EventAttributes & attr) = 0;
+        virtual void sendEventOccurrence_(const EventAttributes & attr, const Arg args[]) = 0;
+    };
+    class AbstractTelemetryChannel {
+    protected:
+        AbstractTelemetryFormatter & m_formatter;
+        AbstractWriter & m_sink;
+    public:
+        AbstractTelemetryChannel(AbstractTelemetryFormatter & formatter, AbstractWriter & sink)
+            : m_formatter(formatter)
+            , m_sink(sink)
+        {}
+        virtual bool tryProcessSample() = 0;
+    private:
+        template<class T1, class T2> friend class TelemetryLogger;
+        void sendSampleTypes(uint16_t sampleLength, const Arg::TypeID sampleTypes[]) {
+            sendSampleTypes_(sampleLength, sampleTypes);
         }
-        inline uint16_t sampleLength() const {
-            return m_fmtLen;
+        void sendSample(const Arg values[]) {
+            sendSample_(values);
         }
-        inline void sendFormattedSample(const Arg args[]) {
-            m_formatter->formatValues(*m_sink, m_fmtLen, args);
-        }
-        bool getSample(Arg * values) {
-            if (!m_source->read(values, sizeof(Arg) * m_fmtLen)) {
-                return false;
-            }
-            return true;
-        }
+        virtual void sendSampleTypes_(uint16_t sampleLength, const Arg::TypeID sampleTypes[]) = 0;
+        virtual void sendSample_(const Arg values[]) = 0;
     };
 
 namespace {
@@ -196,7 +173,7 @@ namespace {
         std::memcpy(&arg->value.Thread, &a, sizeof(a));
     }
     inline void logEvent_sfinae_pchar(Arg * arg, const char * p) {
-        arg->type = static_cast<Arg::TypeId>((int)TypeID<char>::value | (int)Arg::TypeID::__ISARRAY);
+        arg->type = static_cast<Arg::TypeID>((int)TypeID<char>::value | (int)Arg::TypeID::__ISARRAY);
         arg->value.ArrayPointer = p;
         arg->optionalArrayLength = std::strlen(p);
     }
@@ -225,132 +202,52 @@ namespace {
     }
     inline void logEvent_sfinae(Arg * argBuf) { argBuf->type = Arg::TypeID::TI_NONE; }
 }
+    template<
+        class TEventChannel = AbstractEventChannel,
+        class = typename std::enable_if<std::is_base_of<AbstractEventChannel,TEventChannel>::value>::type
+    >
     class EventLogger {
-        std::unique_ptr<AbstractWriter> m_source;
+        TEventChannel & m_wtr;
     public:
-        EventLogger(std::unique_ptr<AbstractWriter> ptr) : m_source(std::move(ptr))
+        EventLogger(TEventChannel & conduit) : m_wtr(conduit)
         {}
-        #define length_write(name) { \
-            uint32_t L = name.end - name.str; \
-            m_source->write(&L, sizeof(L)); \
-        }
-        #define string_write(name) { \
-            uint32_t L = name.end - name.str; \
-            m_source->write(name.str, L); \
-        }
         EventID registerEvent(const Str & msgFmt, const Str & func, const Str & file, uint32_t line, uint16_t argCnt, EventAttributes * out_attr)
         {
             static volatile EventID ID = 0;
-            new(out_attr) EventAttributes{ msgFmt, func, file, ++ID, line, argCount };
+            new(out_attr) EventAttributes{ msgFmt, func, file, ++ID, line, argCnt };
 
-            m_source->write("EvntAttr", 8);
-            m_source->write(&out_attr->id, sizeof(out_attr->id));
-            m_source->write(&line, sizeof(line));
-            m_source->write(&argCnt, sizeof(argCnt));
-            length_write(msgFmt);
-            length_write(func);
-            length_write(file);
-            string_write(msgFmt);
-            string_write(func);
-            string_write(file);
-
+            m_wtr.AbstractEventChannel::sendEventAttributes(*out_attr);
             return out_attr->id;
         }
-        void logEvent(const EventAttributes * attr, const Arg args[])
+        void logEvent(const EventAttributes & attr, const Arg args[])
         {
-            m_source->write("EvntOcrs", 8);
-            m_source->write(&attr->id, sizeof(attr->id));
-            m_source->write(&attr->argumentsExpected, sizeof(attr->argumentsExpected));
-            m_source->write(&args[0], sizeof(Arg) * attr->argumentsExpected);
+            m_wtr.AbstractEventChannel::sendEventOccurrence(attr, args);
         }
-        template<class...Ts> inline void logEvent(const EventAttributes * attributes, Ts &&... args)
-        {
-            Arg argBuf[sizeof...(args) + 1];
-            logEvent_sfinae(&argBuf[0], std::forward<Ts&&>(args)...);
-            logEvent(loggingPoint, argBuf);
-        }
-        #undef length_write
-        #undef string_write
     };
-    class AbstractEventConsumer {
-        std::unique_ptr<AbstractReader> m_source;
-        std::unique_ptr<AbstractEventFormatter> m_formatter;
-        std::unique_ptr<AbstractWriter> m_sink;
+    template<class Logger, class...Ts> inline void logEvent(Logger & logger, const EventAttributes & attributes, Ts &&... args)
+    {
+        Arg argBuf[sizeof...(args) + 1];
+        logEvent_sfinae(&argBuf[0], std::forward<Ts&&>(args)...);
+        logger.logEvent(attributes, argBuf);
+    }
+
+    template<
+        class TTelemetryChannel = AbstractTelemetryChannel,
+        class = typename std::enable_if<std::is_base_of<AbstractTelemetryChannel,TTelemetryChannel>::value>::type
+    >
+    class TelemetryLogger {
+        TTelemetryChannel & m_wtr;
+        uint16_t m_argCount;
     public:
-        AbstractEventConsumer(
-                std::unique_ptr<AbstractReader> source,
-                std::unique_ptr<AbstractEventFormatter> formatter,
-                std::unique_ptr<AbstractWriter> sink)
-            : m_source(std::move(source))
-            , m_formatter(std::move(formatter))
-            , m_sink(std::move(sink))
-        {}
-        struct EventOccurrence {
-            EventID id;
-            uint16_t argCount;
-            const Arg * args;
-            EventOccurrence(EventOccurrence &) = delete;
-            EventOccurrence &operator=(EventOccurrence &) = delete;
-            EventOccurrence &operator=(EventOccurrence &&) = delete;
-            EventOccurrence(EventOccurrence && rhs)
-                : id(rhs.id)
-                , argCount(rhs.argCount)
-                , args(rhs.args)
-            {
-                rhs.args = rhs.argCount = 0;
-            }
-        };
-        virtual bool processEvent() = 0;
-    private:
-        virtual EventAttributes * allocateEventAttributes() = 0;
-        virtual Arg * allocateArgs(uint16_t argCount) = 0;
-        virtual Str allocateString(uint32_t length) = 0;
-    protected:
-        enum class NextItem {
-            Occurrence,
-            Attributes
-        };
-        NextItem readNextItemMark()
+        TelemetryLogger(TTelemetryChannel & wtr, uint16_t formatLength, Arg::TypeID sampleFormat[])
+            : m_wtr(wtr)
+            , m_argCount(formatLength)
         {
-            char mark[8]; m_source->read(mark, 8);
-            if (std::memcmp("EvntAttr", mark, 8) == 0) { return NextItem::Attributes; }
-            if (std::memcmp("EvntOcrs", mark, 0) != 0) { return NextItem::Occurrence; }
-            throw std::runtime_error{"The mark left by a EventLogger not found - the data is corrupted or has wrong format"};
+            m_wtr.sendSampleTypes(formatLength, sampleFormat);
         }
-        EventOccurrence getEventOccurrence()
+        void logSample(const Arg args[])
         {
-            EventOccurrence occ{0,0,0};
-            m_source->read(&occ.id, sizeof(occ.id));
-            m_source->read(&occ.argCnt, sizeof(occ.argCnt));
-            occ.args = allocateArgs(occ.argCnt);
-            m_source->read(&occ->args[0], sizeof(Arg) * argCnt);
-            return std::move(occ);
-        }
-        EventAttributes getEventAttributes()
-        {
-            EventAttributes ret = {0};
-            m_source->read(&const_cast<EventID &>(ret.id), sizeof(ret.id));
-            m_source->read(&const_cast<uint32_t&>(ret.line), sizeof(ret.line));
-            m_source->read(&const_cast<uint16_t&>(ret.argumentsExpected), sizeof(ret.argumentsExpected));
-
-            uint32_t mssg_len; m_source->read(&mssg_len, sizeof(mssg_len));
-            uint32_t func_len; m_source->read(&func_len, sizeof(func_len));
-            uint32_t file_len; m_source->read(&file_len, sizeof(file_len));
-
-            const_cast<Str&>(ret.messageFormat) = allocateString(mssg_len);
-            const_cast<Str&>(ret.function)      = allocateString(func_len);
-            const_cast<Str&>(ret.file)          = allocateString(file_len);
-            m_source->read(mssg.str, mssg_len);
-            m_source->read(func.str, func_len);
-            m_source->read(file.str, file_len);
-
-            return std::move(ret);
-        }
-        inline void sendFormattedAttributes(EventAttributes & attr) {
-            m_formatter->formatEventAttributes(*m_sink, attr);
-        }
-        inline void sendFormattedEvent(EventAttributes & attr, const Arg args[]) {
-            m_formatter->formatEvent(*m_sink, attr, &args[0]);
+            m_wtr.sendSample(args);
         }
     };
 
@@ -377,7 +274,7 @@ namespace {
 }
     #define UTL_logev(CHANNEL, MESSAGE, ...) { \
         static uint8_t cpd[sizeof(_utl::logging::EventAttributes)]; \
-        static _utl::logging::EventID cpdId = (CHANNEL).registerEvent( \
+        static _utl::logging::EventID purposed_to_call_registerEvent_once = (CHANNEL).registerEvent( \
             _utl::logging::Str::create(MESSAGE), \
             _utl::logging::Str::create(__FUNCTION__), \
             _utl::logging::Str::create(_utl::logging::getCharAfterLastSlash(__FILE__)), \
@@ -385,8 +282,8 @@ namespace {
             _utl::logging::count_of(__VA_ARGS__), \
             reinterpret_cast<_utl::logging::EventAttributes*>(cpd) \
         ); \
-        (CHANNEL).logEvent(\
-            reinterpret_cast<const _utl::logging::EventAttributes*>(cpd),##__VA_ARGS__\
+        logEvent(\
+            (CHANNEL), *reinterpret_cast<const _utl::logging::EventAttributes*>(cpd),##__VA_ARGS__\
         ); \
     }
 
