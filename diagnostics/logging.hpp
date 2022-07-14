@@ -22,6 +22,15 @@
 
 namespace _utl { namespace logging {
 
+namespace internal {
+
+    #include <utl/diagnostics/logging/internal/LocklessCircularAllocator.hpp>
+
+    template<typename T>
+    using LocklessCircularAllocator = _utl::LocklessCircularAllocator<T>;
+
+} // internal namespace
+
     using TimePoint = uint64_t;
     using ThreadId = uint32_t;
     using EventID = uint32_t;
@@ -49,99 +58,6 @@ namespace _utl { namespace logging {
         const size_t argumentsExpected; // must be size_t or else getting it at compile-time fails
     };
     std::atomic<uint32_t> EventAttributes::ID_COUNTER{1};
-
-namespace internal {
-
-    template<typename TItem> class LocklessCircularAllocator {
-    private:
-        std::atomic<uint32_t> m_actualSize;
-        std::atomic<uint32_t> m_acquireIndex;
-        std::atomic<uint32_t> m_releaseIndex;
-        uint32_t const m_size;
-        TItem * const m_buf;
-    public:
-        ~LocklessCircularAllocator() {
-            delete[] m_buf;
-        }
-        LocklessCircularAllocator(uint32_t size)
-            : m_buf(new TItem[size])
-            , m_size(size)
-            , m_actualSize(size)
-            , m_acquireIndex(0)
-            , m_releaseIndex(0)
-        {}
-        LocklessCircularAllocator(const LocklessCircularAllocator &) = delete;
-        LocklessCircularAllocator(LocklessCircularAllocator &&) = delete;
-        LocklessCircularAllocator & operator=(const LocklessCircularAllocator &) = delete;
-        LocklessCircularAllocator & operator=(LocklessCircularAllocator &&) = delete;
-
-        inline bool isEmpty() { return m_acquireIndex == m_releaseIndex; }
-        inline TItem * acquire(uint32_t size)
-        {
-            TItem * result = nullptr;
-            uint32_t acquireIndex_old = m_acquireIndex;
-            for (;;)
-            {
-                register uint32_t releaseIndex = m_releaseIndex;
-                register uint32_t acquireIndex_new = acquireIndex_old + size;
-                if (acquireIndex_old < releaseIndex)
-                {
-                    if (acquireIndex_new >= releaseIndex) continue;
-                    if (m_acquireIndex.compare_exchange_weak(acquireIndex_old, acquireIndex_new) == false) continue;
-                    result = m_buf + acquireIndex_old; break;
-                }
-                else // releaseIndex <= acquireIndex_old
-                {
-                    if (acquireIndex_new < m_size) {
-                        if (m_acquireIndex.compare_exchange_weak(acquireIndex_old, acquireIndex_new) == false) continue;
-                        result = m_buf + acquireIndex_old; break;
-                    } else {
-                        m_actualSize.store(acquireIndex_old);
-                        acquireIndex_new = size;
-                        if (acquireIndex_new >= releaseIndex) continue;
-                        if (m_acquireIndex.compare_exchange_weak(acquireIndex_old, acquireIndex_new) == false) continue;
-                        result = m_buf; break;
-                    }
-                }
-            }
-            TItem *end = result + size;
-            TItem *p = result;
-            while (p < end) new(p++) TItem{}; \
-            return result;
-        }
-        inline void release(uint32_t size)
-        {
-            uint32_t releaseIndex_old = m_releaseIndex;
-            for (;;)
-            {
-                register uint32_t acquireIndex = m_acquireIndex;
-                if (releaseIndex_old == acquireIndex) {
-                    return;
-                }
-                register uint32_t releaseIndex_new = releaseIndex_old + size;
-                if (releaseIndex_old <= acquireIndex)
-                {
-                    if (releaseIndex_new > acquireIndex) continue;
-                    if (m_releaseIndex.compare_exchange_weak(releaseIndex_old, releaseIndex_new) == false) continue;
-                    return;
-                }
-                else // acquireIndex < releaseIndex_old
-                {
-                    if (releaseIndex_new < m_actualSize) {
-                        if (m_releaseIndex.compare_exchange_weak(releaseIndex_old, releaseIndex_new) == false) continue;
-                        return;
-                    } else {
-                        releaseIndex_new = size;
-                        if (releaseIndex_new > acquireIndex) continue;
-                        if (m_releaseIndex.compare_exchange_weak(releaseIndex_old, releaseIndex_new) == false) continue;
-                        return;
-                    }
-                }
-            }
-        }
-    };
-
-}
 
     class AbstractEventFormatter {
     public:
