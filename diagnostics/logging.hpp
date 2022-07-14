@@ -126,23 +126,6 @@ namespace internal {
         virtual void sendSample_(const Arg values[]) = 0;
     };
 
-    template<typename TEventChannel>
-    inline const EventID registerEvent(TEventChannel & channel, const EventAttributes & attr)
-    {
-        channel.AbstractEventChannel::sendEventAttributes(attr);
-        return attr.id;
-    }
-    template<
-        typename TEventChannel, class...Ts,
-        typename = typename std::enable_if<std::is_base_of<AbstractEventChannel,TEventChannel>::value>::type
-    >
-    inline void logEvent(TEventChannel & channel, const EventAttributes & attributes, Ts &&... args)
-    {
-        Arg * argBuf = channel.AbstractEventChannel::allocateArgs(sizeof...(Ts));
-        _utl::logging::internal::fillArgsBuffer(argBuf, std::forward<Ts&&>(args)...);
-        channel.AbstractEventChannel::sendEventOccurrence(attributes, argBuf);
-    }
-
     template<
         class TTelemetryChannel = AbstractTelemetryChannel,
         class = typename std::enable_if<std::is_base_of<AbstractTelemetryChannel,TTelemetryChannel>::value>::type
@@ -182,7 +165,25 @@ namespace {
             )-1
         );
     }
+
     template<class...T> constexpr inline size_t count_of(T &&... items) { return sizeof...(items); }
+
+    template<typename TEventChannel>
+    inline const EventID registerEvent(TEventChannel & channel, const EventAttributes & attr)
+    {
+        channel.AbstractEventChannel::sendEventAttributes(attr);
+        return attr.id;
+    }
+    template<
+        typename TEventChannel, class...Ts,
+        typename = typename std::enable_if<std::is_base_of<AbstractEventChannel,TEventChannel>::value>::type
+    >
+    inline void logEvent(TEventChannel & channel, const EventAttributes & attributes, Ts &&... args)
+    {
+        Arg * argBuf = channel.AbstractEventChannel::allocateArgs(sizeof...(Ts));
+        _utl::logging::internal::fillArgsBuffer(argBuf, std::forward<Ts&&>(args)...);
+        channel.AbstractEventChannel::sendEventOccurrence(attributes, argBuf);
+    }
 }
     #define UTL_logev(CHANNEL, MESSAGE, ...) { \
         static _utl::logging::EventAttributes cpd{ \
@@ -193,7 +194,7 @@ namespace {
             __LINE__, \
             _utl::logging::count_of(__VA_ARGS__) \
         }; \
-        static auto purposed_to_call_registerEvent_once = registerEvent(CHANNEL,cpd); \
+        static auto purposed_to_call_registerEvent_once = _utl::logging::registerEvent(CHANNEL,cpd); \
         _utl::logging::logEvent(CHANNEL,cpd,##__VA_ARGS__); \
     }
 
