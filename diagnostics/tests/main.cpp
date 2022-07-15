@@ -125,7 +125,7 @@ namespace {
             void(*func)(CancellationToken, InputDataType &);
         };
         using Worker = std::thread;
-        ConcurrentQueue<WorkItem> m_workItems;
+        internal::ConcurrentQueue<WorkItem> m_workItems;
         std::condition_variable m_workersCVar;
         std::mutex m_workersMutex;
         std::vector<Worker> m_workers;
