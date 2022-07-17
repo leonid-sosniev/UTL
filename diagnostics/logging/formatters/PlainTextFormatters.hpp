@@ -21,7 +21,7 @@ namespace {
     };
     static constexpr uint8_t decimalDigitsNumberByVarSize[1 + 8] = {
     //  0  1    2    3  4   5  6  7  8
-        0, 3+1, 5+1, 0, 10, 0, 0, 0, 20 // digit count must be even 'cause printDecimal prints digit pairs
+        0, 3+1, 5+1, 0, 10+1, 0, 0, 0, 20+1 // also include 1 for a number sign
     };
 
     inline auto printDecimal(char * buffer, const float & number, char *& out_end) -> char*
