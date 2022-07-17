@@ -95,6 +95,28 @@ namespace {
     template<> struct TypeIDGetter<int16_t>  { static constexpr Arg::TypeID value = Arg::TypeID::TI_i16; };
     template<> struct TypeIDGetter<int32_t>  { static constexpr Arg::TypeID value = Arg::TypeID::TI_i32; };
     template<> struct TypeIDGetter<int64_t>  { static constexpr Arg::TypeID value = Arg::TypeID::TI_i64; };
+    template<> struct TypeIDGetter<std::thread::id> {
+        static constexpr Arg::TypeID value = Arg::TypeID::TI_Thread;
+    };
+    template<class C, class D> struct TypeIDGetter<std::chrono::time_point<C,D>> {
+        static constexpr Arg::TypeID value = Arg::TypeID::TI_EpochNsec;
+    };
+    template<typename T> struct TypeIDGetter<T*> {
+        static constexpr Arg::TypeID value = Arg::TypeID::__ISARRAY | TypeIDGetter<T>::value;
+    };
+    template<typename T, size_t N> struct TypeIDGetter<T(&)[N]> {
+        static constexpr Arg::TypeID value = Arg::TypeID::__ISARRAY | TypeIDGetter<T>::value;
+    };
+    template<typename T> struct TypeIDGetter<const T> {
+        static constexpr Arg::TypeID value = TypeIDGetter<T>::value;
+    };
+
+    template<typename T, typename ...Ts> inline void fillTypeIDsBuffer_sfinae(Arg::TypeID * idsBuffer, T &&, Ts &&... rest) {
+        register auto t = TypeIDGetter<T>::value;
+        *idsBuffer++ = t;
+        fillTypeIDsBuffer_sfinae(idsBuffer, std::forward<Ts&&>(rest)...);
+    }
+    inline void fillTypeIDsBuffer_sfinae(Arg::TypeID *) {}
 
     inline void fillArgsBuffer_sfinae(Arg * arg, std::thread::id && a) {
         arg->type = Arg::TypeID::TI_Thread;
@@ -135,6 +157,10 @@ namespace {
 
 namespace internal {
 
+    template<typename ...Ts> inline void fillTypeIDsBuffer(Arg::TypeID * idsBuffer, Ts &&... ids)
+    {
+        fillTypeIDsBuffer_sfinae(idsBuffer, std::forward<Ts&&>(ids)...);
+    }
     template<class...Ts> inline void fillArgsBuffer(Arg * argBuf, Ts &&... args)
     {
         fillArgsBuffer_sfinae(argBuf, std::forward<Ts&&>(args)...);
