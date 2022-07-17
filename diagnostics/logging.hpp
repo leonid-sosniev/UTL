@@ -148,7 +148,10 @@ namespace {
 
     template<class...T> constexpr inline size_t count_of(T &&... items) { return sizeof...(items); }
 
-    template<typename TEventChannel>
+    template<
+        typename TEventChannel,
+        typename = typename std::enable_if<std::is_base_of<AbstractEventChannel,TEventChannel>::value>::type
+    >
     inline const EventID registerEvent(TEventChannel & channel, const EventAttributes & attr)
     {
         channel.AbstractEventChannel::sendEventAttributes(attr);
