@@ -19,7 +19,8 @@
 #include <utl/diagnostics/logging.hpp>
 #include <utl/diagnostics/logging/writers.hpp>
 #include <utl/diagnostics/logging/formatters/PlainTextFormatters.hpp>
-#include <utl/diagnostics/logging/channels.hpp>
+#include <utl/diagnostics/logging/channels/InterThreadChannels.hpp>
+#include <utl/diagnostics/logging/channels/WebChannels.hpp>
 
 #include <inttypes.h>
 
