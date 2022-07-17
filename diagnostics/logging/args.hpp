@@ -73,10 +73,10 @@ namespace _utl { namespace logging {
         assert(a == Arg::TypeID::__ISARRAY || b == Arg::TypeID::__ISARRAY);
         return static_cast<Arg::TypeID>(int(a) | int(b));
     }
-    inline Arg::TypeID operator&(Arg::TypeID a, Arg::TypeID b)
+    inline bool operator&(Arg::TypeID a, Arg::TypeID b)
     {
         assert(a == Arg::TypeID::__ISARRAY || b == Arg::TypeID::__ISARRAY);
-        return static_cast<Arg::TypeID>(int(a) & int(b));
+        return int(a) & int(b);
     }
 
 namespace {
