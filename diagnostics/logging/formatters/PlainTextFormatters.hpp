@@ -134,5 +134,81 @@ namespace {
         }
     };
 
+    class PlainTextTelemetryFormatter : public AbstractTelemetryFormatter {
+    private:
+        Arg::TypeID m_typesStaticBuffer[32];
+        Arg::TypeID * m_types = m_typesStaticBuffer;
+        uint16_t m_sampleLength = 0;
+    public:
+        ~PlainTextTelemetryFormatter()
+        {
+            if (m_types != m_typesStaticBuffer) {
+                delete[] m_types;
+            }
+        }
+        virtual void formatExpectedTypes(AbstractWriter & wtr, uint16_t count, const Arg::TypeID types[]) final override {
+            if (m_sampleLength) {
+                throw std::logic_error{ "PlainTextTelemetryFormatter::formatExpectedTypes() has already been called for the instance." };
+            } else {
+#if defined(DEBUG)
+                Arg::TypeID t; for (auto i = count; i-->0;) { t = types[i]; assert(t != Arg::TypeID::TI_UNKNOWN); }
+#endif
+                if (std::size(m_typesStaticBuffer) < count) m_types = new Arg::TypeID[count];
+                m_sampleLength = count;
+                std::memcpy(m_types, types, count);
+            }
+        }
+        virtual void formatValues(AbstractWriter & wtr, const Arg arg[]) final override {
+    #if defined(DEBUG)
+            const Arg *a; for (auto i = m_sampleLength; i-->0;) { a = &arg[i]; assert(a->type == m_types[i]); }
+    #endif
+            auto writer = &wtr;
+            char fmtBuf[32];
+            char * fmtStr;
+            char * fmtEnd;
+            for (uint16_t i = 0; i < m_sampleLength; ++i,++arg) {
+                switch (m_types[i]) {
+                    #define WRITE_ARRAY_OF(TYPE) \
+                        writer->write("{", 1); \
+                        for (uint32_t i = 0; i < arg->arrayLength; ++i) { \
+                            fmtStr = printDecimal(fmtBuf, static_cast<const TYPE*>(arg->valueOrArray.ArrayPointer)[i], fmtEnd); \
+                            *fmtEnd++ = ','; \
+                            writer->write(fmtStr,fmtEnd-fmtStr); \
+                        } \
+                        writer->write("}", 1);
+                    case Arg::TypeID::TI_arrayof_u8:        WRITE_ARRAY_OF(uint8_t);  break;
+                    case Arg::TypeID::TI_arrayof_u16:       WRITE_ARRAY_OF(uint16_t); break;
+                    case Arg::TypeID::TI_arrayof_u32:       WRITE_ARRAY_OF(uint32_t); break;
+                    case Arg::TypeID::TI_arrayof_u64:       WRITE_ARRAY_OF(uint64_t); break;
+                    case Arg::TypeID::TI_arrayof_i8:        WRITE_ARRAY_OF(int8_t);   break;
+                    case Arg::TypeID::TI_arrayof_i16:       WRITE_ARRAY_OF(int16_t);  break;
+                    case Arg::TypeID::TI_arrayof_i32:       WRITE_ARRAY_OF(int32_t);  break;
+                    case Arg::TypeID::TI_arrayof_i64:       WRITE_ARRAY_OF(int64_t);  break;
+                    case Arg::TypeID::TI_arrayof_f32:       WRITE_ARRAY_OF(float);    break;
+                    case Arg::TypeID::TI_arrayof_f64:       WRITE_ARRAY_OF(double);   break;
+                    case Arg::TypeID::TI_arrayof_Char:      writer->write((char*) arg->valueOrArray.ArrayPointer, arg->arrayLength); writer->write(",",1); break;
+                    case Arg::TypeID::TI_arrayof_Thread:    WRITE_ARRAY_OF(ThreadId); break;
+                    case Arg::TypeID::TI_arrayof_EpochNsec: WRITE_ARRAY_OF(TimePoint); break;
+                    #undef WRITE_ARRAY_OF
+                    case Arg::TypeID::TI_u8:        fmtStr = printDecimal(fmtBuf, arg->valueOrArray.u8 , fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                    case Arg::TypeID::TI_u16:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.u16, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                    case Arg::TypeID::TI_u32:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.u32, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                    case Arg::TypeID::TI_u64:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.u64, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                    case Arg::TypeID::TI_i8:        fmtStr = printDecimal(fmtBuf, arg->valueOrArray.i8 , fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                    case Arg::TypeID::TI_i16:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.i16, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                    case Arg::TypeID::TI_i32:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.i32, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                    case Arg::TypeID::TI_i64:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.i64, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                    case Arg::TypeID::TI_f32:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.f32, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                    case Arg::TypeID::TI_f64:       fmtStr = printDecimal(fmtBuf, arg->valueOrArray.f64, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                    case Arg::TypeID::TI_Char:      writer->write(&arg->valueOrArray.Char,1); break;
+                    case Arg::TypeID::TI_Thread:    fmtStr = printDecimal(fmtBuf, arg->valueOrArray.Thread,    fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                    case Arg::TypeID::TI_EpochNsec: fmtStr = printDecimal(fmtBuf, arg->valueOrArray.EpochNsec, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
+                    default: break;
+                }
+                writer->write("\n", 1);
+            }
+        }
+    };
+
 } // namespace logging
 } // namespace _utl
