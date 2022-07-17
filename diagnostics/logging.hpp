@@ -126,26 +126,6 @@ namespace internal {
         virtual void sendSample_(const Arg values[]) = 0;
     };
 
-    template<
-        class TTelemetryChannel = AbstractTelemetryChannel,
-        class = typename std::enable_if<std::is_base_of<AbstractTelemetryChannel,TTelemetryChannel>::value>::type
-    >
-    class TelemetryLogger {
-        TTelemetryChannel & m_wtr;
-        uint16_t m_argCount;
-    public:
-        TelemetryLogger(TTelemetryChannel & wtr, uint16_t formatLength, Arg::TypeID sampleFormat[])
-            : m_wtr(wtr)
-            , m_argCount(formatLength)
-        {
-            m_wtr.sendSampleTypes(formatLength, sampleFormat);
-        }
-        void logSample(const Arg args[])
-        {
-            m_wtr.sendSample(args);
-        }
-    };
-
 namespace {
     constexpr const char * getCharAfterLastSlash_searchEnd(const char * str) {
         return *str ? getCharAfterLastSlash_searchEnd(str+1) : str;
@@ -184,6 +164,25 @@ namespace {
         _utl::logging::internal::fillArgsBuffer(argBuf, std::forward<Ts&&>(args)...);
         channel.AbstractEventChannel::sendEventOccurrence(attributes, argBuf);
     }
+
+    template<
+        class TTelemetryChannel,
+        class = typename std::enable_if<std::is_base_of<AbstractTelemetryChannel,TTelemetryChannel>::value>::type
+    >
+    inline void registerSampleTypes(TTelemetryChannel & channel, uint16_t formatLength, Arg::TypeID sampleFormat[])
+    {
+        channel.AbstractTelemetryChannel::sendSampleTypes(formatLength, sampleFormat);
+    }
+    template<
+        class TTelemetryChannel, typename ...Ts,
+        class = typename std::enable_if<std::is_base_of<AbstractTelemetryChannel,TTelemetryChannel>::value>::type
+    >
+    inline void logSample(TTelemetryChannel & channel, Ts &&... args)
+    {
+        Arg * argBuf = channel.AbstractTelemetryChannel::allocateArgs(sizeof...(Ts));
+        _utl::logging::internal::fillArgsBuffer(argBuf, std::forward<Ts&&>(args)...);
+        channel.AbstractTelemetryChannel::sendSample(argBuf);
+    }
 }
     #define UTL_logev(CHANNEL, MESSAGE, ...) { \
         static _utl::logging::EventAttributes cpd{ \
@@ -196,6 +195,15 @@ namespace {
         }; \
         static auto purposed_to_call_registerEvent_once = _utl::logging::registerEvent(CHANNEL,cpd); \
         _utl::logging::logEvent(CHANNEL,cpd,##__VA_ARGS__); \
+    }
+
+    #define UTL_logsam(CHANNEL, ...) { \
+        _utl::logging::Arg::TypeID sampleTypeIDsBuffer[_utl::logging::count_of(__VA_ARGS__)]; \
+        static uint8_t purposed_to_call_once = ( \
+            _utl::logging::internal::fillTypeIDsBuffer(sampleTypeIDsBuffer,##__VA_ARGS__), \
+            _utl::logging::registerSampleTypes(CHANNEL, _utl::logging::count_of(__VA_ARGS__), sampleTypeIDsBuffer), \
+        0); \
+        _utl::logging::logSample(CHANNEL,##__VA_ARGS__); \
     }
 
 } // logging
