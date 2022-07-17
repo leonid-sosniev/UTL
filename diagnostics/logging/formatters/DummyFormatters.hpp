@@ -14,7 +14,7 @@ namespace _utl { namespace logging {
     public:
         virtual ~DummyTelemetryFormatter() {}
         void formatExpectedTypes(AbstractWriter &, uint16_t, const Arg::TypeID[]) override {}
-        void formatValues(AbstractWriter &, uint16_t, const Arg[]) override {}
+        void formatValues(AbstractWriter &, const Arg[]) override {}
     };
 
 } // logging

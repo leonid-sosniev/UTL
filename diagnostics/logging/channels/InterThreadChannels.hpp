@@ -62,7 +62,7 @@ namespace internal {
         [[nodiscard]] bool tryProcessSample() final override {
             const Arg * args;
             if (!m_queue.tryDequeue(args)) return false;
-            m_formatter.formatValues(this->m_sink, m_sampleLen, args);
+            m_formatter.formatValues(this->m_sink, args);
             releaseArgs(m_sampleLen);
             return true;
         }

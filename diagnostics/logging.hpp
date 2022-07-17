@@ -69,7 +69,7 @@ namespace internal {
     public:
         virtual ~AbstractTelemetryFormatter() {}
         virtual void formatExpectedTypes(AbstractWriter & wtr, uint16_t count, const Arg::TypeID types[]) = 0;
-        virtual void formatValues(AbstractWriter & wtr, uint16_t count, const Arg arg[]) = 0;
+        virtual void formatValues(AbstractWriter & wtr, const Arg arg[]) = 0;
     };
 
     class AbstractEventChannel {
