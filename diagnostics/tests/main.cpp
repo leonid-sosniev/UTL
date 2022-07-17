@@ -278,6 +278,18 @@ TEST_CASE("socket-based (inter-threaded)", "[validation]")
     th2.join();
 }
 
+inline uint64_t rdtsc()
+{
+#if defined(GCC)
+    uint32_t lo, hi;
+    asm volatile ( "rdtsc\n" : "=a" (lo), "=d" (hi) );
+#elif defined(__clang__)
+    return __rdtsc();
+#else
+    #error "The platform is not supported"
+#endif
+}
+
 TEST_CASE("InterThreadEventChannel benchmark", "[benchmark]")
 {
     unsigned bufferSize = 0;
@@ -320,4 +332,56 @@ TEST_CASE("InterThreadEventChannel benchmark", "[benchmark]")
     BENCHMARK(name) {
         UTL_logev(chan, "this is some message to be logged here and consumed", -1, 'w', "some words", 0.56);
     };
+}
+
+
+inline std::chrono::nanoseconds runEmptyLoop(int iterations)
+{
+    auto t_0 = std::chrono::system_clock::now();
+    for (int i = 0; i < iterations; ++i) {}
+    return std::chrono::system_clock::now() - t_0;
+}
+
+TEST_CASE("InterThreadTelemetryChannel benchmark", "[benchmark]")
+{
+    DummyWriter wtr{};
+    PlainTextTelemetryFormatter fmt;
+    std::unique_ptr<InterThreadTelemetryChannel> chan;
+    std::function<void(CancellationToken)> consumer = [&chan](CancellationToken token) {
+        try {
+            while (chan->tryProcessSample() || !token.isCancelled()) {}
+        }
+        catch (std::exception & exc) {
+            std::cout << exc.what() << std::endl;
+        }
+        catch (...) {}
+    };
+
+
+#define BENCHMARK_RUN(BUFFER_SIZE, NAME_STR) \
+    SECTION("InterThreadTelemetryChannel " NAME_STR) { \
+        static const Arg::TypeID types[] = { \
+            Arg::TypeID::TI_arrayof_Char, Arg::TypeID::TI_i32, Arg::TypeID::TI_Char, \
+            Arg::TypeID::TI_arrayof_Char, Arg::TypeID::TI_f32, Arg::TypeID::TI_EpochNsec \
+        }; \
+        chan.reset(new InterThreadTelemetryChannel{fmt, wtr, 1024, BUFFER_SIZE, 6, types}); \
+        ThreadWorker C{consumer}; \
+        BENCHMARK("InterThreadTelemetryChannel " NAME_STR) { \
+            UTL_logsam(*chan, "this is some message to be logged here and consumed", -1, 'w', "some words", 0.56f, std::chrono::system_clock::now()); \
+        }; \
+        auto t_0 = std::chrono::system_clock::now(); \
+        for (int i = 0; i < 1'000'000; ++i) { \
+            UTL_logsam(*chan, "this is some message to be logged here and consumed", -1, 'w', "some words", 0.56f, std::chrono::system_clock::now()); \
+        } \
+        std::cerr << std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now() - t_0 - runEmptyLoop(1'000'000)).count() \
+        << " nsec for 1M samples" << std::endl; \
+    }
+
+    BENCHMARK_RUN(1024, "1kB");
+    BENCHMARK_RUN(16384, "16kB");
+    BENCHMARK_RUN(65536, "64kB");
+    BENCHMARK_RUN(1024*1024, "1MB");
+    BENCHMARK_RUN(16*1024*1024, "16MB");
+
+#undef BENCHMARK_RUN
 }
