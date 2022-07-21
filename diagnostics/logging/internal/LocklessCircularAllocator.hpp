@@ -7,19 +7,19 @@ namespace _utl {
 
     template<typename TItem> class LocklessCircularAllocator {
     private:
-        std::atomic<uint32_t> m_actualSize;
+        std::atomic<uint32_t> m_actualLength;
         std::atomic<uint32_t> m_acquireIndex;
         std::atomic<uint32_t> m_releaseIndex;
-        uint32_t const m_size;
+        uint32_t const m_length;
         TItem * const m_buf;
     public:
         ~LocklessCircularAllocator() {
             delete[] m_buf;
         }
-        LocklessCircularAllocator(uint32_t size)
-            : m_buf(new TItem[size])
-            , m_size(size)
-            , m_actualSize(size)
+        LocklessCircularAllocator(uint32_t length)
+            : m_buf(new TItem[length])
+            , m_length(length)
+            , m_actualLength(length)
             , m_acquireIndex(0)
             , m_releaseIndex(0)
         {}
@@ -29,14 +29,14 @@ namespace _utl {
         LocklessCircularAllocator & operator=(LocklessCircularAllocator &&) = delete;
 
         inline bool isEmpty() { return m_acquireIndex == m_releaseIndex; }
-        inline TItem * acquire(uint32_t size)
+        inline TItem * acquire(uint32_t length)
         {
             TItem * result = nullptr;
             uint32_t acquireIndex_old = m_acquireIndex;
             for (;;)
             {
                 register uint32_t releaseIndex = m_releaseIndex;
-                register uint32_t acquireIndex_new = acquireIndex_old + size;
+                register uint32_t acquireIndex_new = acquireIndex_old + length;
                 if (acquireIndex_old < releaseIndex)
                 {
                     if (acquireIndex_new >= releaseIndex) continue;
@@ -45,12 +45,12 @@ namespace _utl {
                 }
                 else // releaseIndex <= acquireIndex_old
                 {
-                    if (acquireIndex_new < m_size) {
+                    if (acquireIndex_new < m_length) {
                         if (m_acquireIndex.compare_exchange_weak(acquireIndex_old, acquireIndex_new) == false) continue;
                         result = m_buf + acquireIndex_old; break;
                     } else {
-                        m_actualSize.store(acquireIndex_old);
-                        acquireIndex_new = size;
+                        m_actualLength.store(acquireIndex_old);
+                        acquireIndex_new = length;
                         if (acquireIndex_new >= releaseIndex) continue;
                         if (m_acquireIndex.compare_exchange_weak(acquireIndex_old, acquireIndex_new) == false) continue;
                         result = m_buf; break;
@@ -62,7 +62,7 @@ namespace _utl {
             while (p < end) new(p++) TItem{};
             return result;
         }
-        inline void release(uint32_t size)
+        inline void release(uint32_t length)
         {
             uint32_t releaseIndex_old = m_releaseIndex;
             for (;;)
@@ -71,7 +71,7 @@ namespace _utl {
                 if (releaseIndex_old == acquireIndex) {
                     return;
                 }
-                register uint32_t releaseIndex_new = releaseIndex_old + size;
+                register uint32_t releaseIndex_new = releaseIndex_old + length;
                 if (releaseIndex_old <= acquireIndex)
                 {
                     if (releaseIndex_new > acquireIndex) continue;
@@ -80,11 +80,11 @@ namespace _utl {
                 }
                 else // acquireIndex < releaseIndex_old
                 {
-                    if (releaseIndex_new < m_actualSize) {
+                    if (releaseIndex_new < m_actualLength) {
                         if (m_releaseIndex.compare_exchange_weak(releaseIndex_old, releaseIndex_new) == false) continue;
                         return;
                     } else {
-                        releaseIndex_new = size;
+                        releaseIndex_new = length;
                         if (releaseIndex_new > acquireIndex) continue;
                         if (m_releaseIndex.compare_exchange_weak(releaseIndex_old, releaseIndex_new) == false) continue;
                         return;
