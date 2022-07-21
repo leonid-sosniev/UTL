@@ -5,8 +5,9 @@
 
 namespace _utl {
 
-    template<typename TItem> class LocklessCircularAllocator {
+    template<size_t SizeofItem> class LocklessCircularAllocator {
     private:
+        using TItem = uint8_t[SizeofItem];
         std::atomic<uint32_t> m_actualLength;
         std::atomic<uint32_t> m_acquireIndex;
         std::atomic<uint32_t> m_releaseIndex;
@@ -29,7 +30,7 @@ namespace _utl {
         LocklessCircularAllocator & operator=(LocklessCircularAllocator &&) = delete;
 
         inline bool isEmpty() { return m_acquireIndex == m_releaseIndex; }
-        inline TItem * acquire(uint32_t length)
+        inline void * acquire(uint32_t length)
         {
             TItem * result = nullptr;
             uint32_t acquireIndex_old = m_acquireIndex;
@@ -57,9 +58,6 @@ namespace _utl {
                     }
                 }
             }
-            TItem *end = result + size;
-            TItem *p = result;
-            while (p < end) new(p++) TItem{};
             return result;
         }
         inline void release(uint32_t length)

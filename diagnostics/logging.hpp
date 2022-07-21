@@ -27,7 +27,7 @@ namespace internal {
     #include <utl/diagnostics/logging/internal/LocklessCircularAllocator.hpp>
 
     template<typename T>
-    using LocklessCircularAllocator = _utl::LocklessCircularAllocator<T>;
+    using LocklessCircularAllocator = _utl::LocklessCircularAllocator<sizeof(T)>;
 
 } // internal namespace
 
@@ -92,7 +92,7 @@ namespace internal {
         virtual bool tryReceiveAndProcessEvent() = 0;
         inline void sendEventAttributes(const EventAttributes & attr) { sendEventAttributes_(attr); }
         inline void sendEventOccurrence(const EventAttributes & attr, const Arg args[]) { sendEventOccurrence_(attr, args); }
-        Arg * allocateArgs(uint32_t count) { return m_argsAllocator.acquire(count); }
+        Arg * allocateArgs(uint32_t count) { return static_cast<Arg*>(m_argsAllocator.acquire(count)); }
     protected:
         void releaseArgs(uint32_t count) { m_argsAllocator.release(count); }
     private:
@@ -109,12 +109,12 @@ namespace internal {
         AbstractTelemetryChannel(AbstractTelemetryFormatter & formatter, AbstractWriter & sink, uint32_t eventArgsBufferSize)
             : m_formatter(formatter)
             , m_sink(sink)
-            , m_argsAllocator(eventArgsBufferSize)
+            , m_argsAllocator(eventArgsBufferSize / sizeof(Arg))
             , m_needsInit(true)
         {}
         virtual uint16_t sampleLength() const = 0;
         virtual bool tryProcessSample() = 0;
-        Arg * allocateArgs(uint32_t count) { return m_argsAllocator.acquire(count); }
+        Arg * allocateArgs(uint32_t count) { return static_cast<Arg*>(m_argsAllocator.acquire(count)); }
     protected:
         /** The method MUST be called right after the constructor has done its work */
         inline void initializeAfterConstruction(uint16_t sampleLength, const Arg::TypeID sampleTypes[]) {
