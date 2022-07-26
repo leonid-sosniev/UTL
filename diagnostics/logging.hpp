@@ -110,6 +110,7 @@ namespace internal {
             , m_sink(sink)
             , m_argsAllocator(eventArgsBufferSize)
         {}
+        virtual uint16_t sampleLength() const = 0;
         virtual bool tryProcessSample() = 0;
         Arg * allocateArgs(uint32_t count) { return m_argsAllocator.acquire(count); }
     protected:
@@ -182,6 +183,7 @@ namespace {
     >
     inline void logSample(TTelemetryChannel & channel, Ts &&... args)
     {
+        assert(channel.sampleLength() == sizeof...(Ts));
         Arg * argBuf = channel.AbstractTelemetryChannel::allocateArgs(sizeof...(Ts));
         _utl::logging::internal::fillArgsBuffer(argBuf, std::forward<Ts&&>(args)...);
         channel.AbstractTelemetryChannel::sendSample(argBuf);
