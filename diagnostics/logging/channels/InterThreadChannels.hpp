@@ -54,11 +54,15 @@ namespace internal {
         internal::ConcurrentQueue<const Arg *> m_queue;
         uint16_t m_sampleLen;
     public:
-        InterThreadTelemetryChannel(AbstractTelemetryFormatter & formatter, AbstractWriter & sink, uint32_t argsAllocatorCapacity, uint32_t bufferSize)
+        InterThreadTelemetryChannel(
+                AbstractTelemetryFormatter & formatter, AbstractWriter & sink, uint32_t argsAllocatorCapacity,
+                uint32_t bufferSize, uint16_t sampleLength, const Arg::TypeID * sampleTypes)
             : AbstractTelemetryChannel(formatter, sink, argsAllocatorCapacity)
             , m_queue(bufferSize / sizeof(Arg::Value))
             , m_sampleLen(0)
-        {}
+        {
+            initializeAfterConstruction(sampleLength, sampleTypes);
+        }
         [[nodiscard]] bool tryProcessSample() final override {
             const Arg * args;
             if (!m_queue.tryDequeue(args)) return false;
