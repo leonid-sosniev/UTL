@@ -133,13 +133,6 @@ namespace {
         static constexpr Arg::TypeID value = TypeIDGetter<T>::value;
     };
 
-    template<typename T, typename ...Ts> inline void fillTypeIDsBuffer_sfinae(Arg::TypeID * idsBuffer, T &&, Ts &&... rest) {
-        register auto t = TypeIDGetter<T>::value;
-        *idsBuffer++ = t;
-        fillTypeIDsBuffer_sfinae(idsBuffer, std::forward<Ts&&>(rest)...);
-    }
-    inline void fillTypeIDsBuffer_sfinae(Arg::TypeID *) {}
-
     inline void fillArgsBuffer_sfinae(Arg * arg, std::thread::id && a) {
         arg->type = Arg::TypeID::TI_Thread;
         std::memcpy(&arg->valueOrArray.Thread, &a, sizeof(a));
@@ -179,10 +172,6 @@ namespace {
 
 namespace internal {
 
-    template<typename ...Ts> inline void fillTypeIDsBuffer(Arg::TypeID * idsBuffer, Ts &&... ids)
-    {
-        fillTypeIDsBuffer_sfinae(idsBuffer, std::forward<Ts&&>(ids)...);
-    }
     template<class...Ts> inline void fillArgsBuffer(Arg * argBuf, Ts &&... args)
     {
         fillArgsBuffer_sfinae(argBuf, std::forward<Ts&&>(args)...);
