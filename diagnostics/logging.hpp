@@ -200,10 +200,6 @@ namespace {
     }
 
     #define UTL_logsam(CHANNEL, ...) { \
-        _utl::logging::Arg::TypeID sampleTypeIDsBuffer[_utl::logging::count_of(__VA_ARGS__)]; \
-        static uint8_t purposed_to_call_once = ( \
-            _utl::logging::internal::fillTypeIDsBuffer(sampleTypeIDsBuffer,##__VA_ARGS__), \
-        0); \
         _utl::logging::logSample(CHANNEL,##__VA_ARGS__); \
     }
 
