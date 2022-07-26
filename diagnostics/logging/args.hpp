@@ -42,6 +42,28 @@ namespace _utl { namespace logging {
             TI_UNKNOWN   = 28,
             __TYPE_ID_COUNT
         };
+        static const char * typeName(TypeID type) {
+            static const char * typeId2Name[(int) TypeID::__TYPE_ID_COUNT] = {
+                "NONE"     , ""          ,
+                "uint8_t"  , "uint8_t[]" ,
+                "uint16_t" , "uint16_t[]",
+                "uint32_t" , "uint32_t[]",
+                "uint64_t" , "uint64_t[]",
+                "int8_t"   , "int8_t[]"  ,
+                "int16_t"  , "int16_t[]" ,
+                "int32_t"  , "int32_t[]" ,
+                "int64_t"  , "int64_t[]" ,
+                "float"    , "float[]"   ,
+                "double"   , "double[]"  ,
+                "char"     , "char[]"    ,
+                "ThreadId" , "ThreadId[]",
+                "TimePoint", "TimePoint[]",
+            };
+            if (unsigned(type) >= (unsigned) TypeID::__TYPE_ID_COUNT) {
+                throw std::runtime_error{ "Arg::typeName() was given an invalid type ID" };
+            }
+            return typeId2Name[(unsigned) type];
+        }
         static uint8_t typeSize(TypeID type) {
             static const uint8_t typeId2Size[(int) TypeID::__TYPE_ID_COUNT] = {
                 0, 0, // TI_NONE
