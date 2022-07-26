@@ -104,22 +104,27 @@ namespace internal {
         AbstractTelemetryFormatter & m_formatter;
         AbstractWriter & m_sink;
         internal::LocklessCircularAllocator<Arg> m_argsAllocator;
+        bool m_needsInit;
     public:
         AbstractTelemetryChannel(AbstractTelemetryFormatter & formatter, AbstractWriter & sink, uint32_t eventArgsBufferSize)
             : m_formatter(formatter)
             , m_sink(sink)
             , m_argsAllocator(eventArgsBufferSize)
+            , m_needsInit(true)
         {}
         virtual uint16_t sampleLength() const = 0;
         virtual bool tryProcessSample() = 0;
         Arg * allocateArgs(uint32_t count) { return m_argsAllocator.acquire(count); }
     protected:
+        /** The method MUST be called right after the constructor has done its work */
+        inline void initializeAfterConstruction(uint16_t sampleLength, const Arg::TypeID sampleTypes[]) {
+            sendSampleTypes_(sampleLength, sampleTypes);
+            m_needsInit = false;
+        }
         void releaseArgs(uint32_t count) { m_argsAllocator.release(count); }
     public:
-        void sendSampleTypes(uint16_t sampleLength, const Arg::TypeID sampleTypes[]) {
-            sendSampleTypes_(sampleLength, sampleTypes);
-        }
         void sendSample(const Arg values[]) {
+            assert(m_needsInit == false);
             sendSample_(values);
         }
     private:
@@ -170,14 +175,6 @@ namespace {
     }
 
     template<
-        class TTelemetryChannel,
-        class = typename std::enable_if<std::is_base_of<AbstractTelemetryChannel,TTelemetryChannel>::value>::type
-    >
-    inline void registerSampleTypes(TTelemetryChannel & channel, uint16_t formatLength, Arg::TypeID sampleFormat[])
-    {
-        channel.AbstractTelemetryChannel::sendSampleTypes(formatLength, sampleFormat);
-    }
-    template<
         class TTelemetryChannel, typename ...Ts,
         class = typename std::enable_if<std::is_base_of<AbstractTelemetryChannel,TTelemetryChannel>::value>::type
     >
@@ -206,7 +203,6 @@ namespace {
         _utl::logging::Arg::TypeID sampleTypeIDsBuffer[_utl::logging::count_of(__VA_ARGS__)]; \
         static uint8_t purposed_to_call_once = ( \
             _utl::logging::internal::fillTypeIDsBuffer(sampleTypeIDsBuffer,##__VA_ARGS__), \
-            _utl::logging::registerSampleTypes(CHANNEL, _utl::logging::count_of(__VA_ARGS__), sampleTypeIDsBuffer), \
         0); \
         _utl::logging::logSample(CHANNEL,##__VA_ARGS__); \
     }
