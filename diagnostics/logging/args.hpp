@@ -68,12 +68,12 @@ namespace _utl { namespace logging {
         TypeID type;
         uint32_t arrayLength;
     };
-    inline Arg::TypeID operator|(Arg::TypeID a, Arg::TypeID b)
+    constexpr inline Arg::TypeID operator|(Arg::TypeID a, Arg::TypeID b)
     {
         assert(a == Arg::TypeID::__ISARRAY || b == Arg::TypeID::__ISARRAY);
         return static_cast<Arg::TypeID>(int(a) | int(b));
     }
-    inline bool operator&(Arg::TypeID a, Arg::TypeID b)
+    constexpr inline bool operator&(Arg::TypeID a, Arg::TypeID b)
     {
         assert(a == Arg::TypeID::__ISARRAY || b == Arg::TypeID::__ISARRAY);
         return int(a) & int(b);
