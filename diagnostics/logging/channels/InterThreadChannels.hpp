@@ -66,6 +66,7 @@ namespace internal {
             releaseArgs(m_sampleLen);
             return true;
         }
+        uint16_t sampleLength() const final override { return m_sampleLen; }
     private:
         void sendSampleTypes_(uint16_t sampleLength, const Arg::TypeID sampleTypes[]) final override {
             m_sampleLen = sampleLength;
