@@ -16,7 +16,7 @@
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/release/${input:ExeName}",
-            "args": [],
+            "args": [ "[channel]" ],
             "cwd": "${workspaceFolder}/release",
             "miDebuggerPath": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\Llvm\\x64\\bin\\clangd.exe",
         },

@@ -14,6 +14,8 @@ namespace _utl { namespace logging {
 
     struct Arg {
         union Value {
+            const void * ArrayPointer; // let this field be initializable
+            const char * debugPtr;
             int8_t    i8;   uint8_t   u8;
             int16_t   i16;  uint16_t  u16;
             int32_t   i32;  uint32_t  u32;
@@ -22,7 +24,6 @@ namespace _utl { namespace logging {
             char      Char;
             ThreadId  Thread;
             TimePoint EpochNsec;
-            const void * ArrayPointer;
         };
         enum class TypeID : uint8_t {
             TI_NONE      = 0,  __ISARRAY            = 1,

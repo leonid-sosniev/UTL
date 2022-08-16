@@ -205,8 +205,8 @@ namespace {
                     case Arg::TypeID::TI_EpochNsec: fmtStr = printDecimal(fmtBuf, arg->valueOrArray.EpochNsec, fmtEnd); *fmtEnd++ = ','; writer->write(fmtStr,fmtEnd-fmtStr);  break;
                     default: break;
                 }
-                writer->write("\n", 1);
             }
+            writer->write("\n", 1);
         }
     };
 

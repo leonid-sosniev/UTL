@@ -23,6 +23,8 @@
 
 #include <cassert>
 
+#define nameof(identifier) #identifier
+
 namespace _utl { namespace logging {
 
 namespace {
@@ -57,64 +59,61 @@ namespace {
     class NullEventFormatter : public AbstractEventFormatter {
     public:
         void formatEventAttributes(AbstractWriter & wtr, const EventAttributes & attr) final override {
-            throw std::logic_error{ "NullEventFormatter::formatEventAttributes() is not implemented (and shall not be)." };
+            throw std::logic_error{ nameof(NullEventFormatter::formatEventAttributes()) " is not implemented (and shall not be)." };
         }
         void formatEvent(AbstractWriter & wtr, const EventAttributes & attr, const Arg arg[]) final override {
-            throw std::logic_error{ "NullEventFormatter::formatEvent() is not implemented (and shall not be)." };
+            throw std::logic_error{ nameof(NullEventFormatter::formatEvent()) " is not implemented (and shall not be)." };
         }
         ~NullEventFormatter() final override {}
+    };
+    class NullTelemetryFormatter : public AbstractTelemetryFormatter {
+    public:
+        virtual void formatExpectedTypes(AbstractWriter & wtr, uint16_t count, const Arg::TypeID types[]) final override {
+            throw std::logic_error{ nameof(NullTelemetryFormatter::formatExpectedTypes()) " is not implemented (and shall not be)." };
+        }
+        virtual void formatValues(AbstractWriter & wtr, const Arg arg[]) final override {
+            throw std::logic_error{ nameof(NullTelemetryFormatter::formatValues()) " is not implemented (and shall not be)." };
+        }
+        ~NullTelemetryFormatter() final override {}
     };
     class NullWriter : public AbstractWriter {
     public:
         uint32_t write(const void * data, uint32_t size) final override {
-            throw std::logic_error{ "NullWriter::write() is not implemented (and shall not be)." };
+            throw std::logic_error{ nameof(NullWriter::write()) " is not implemented (and shall not be)." };
         }
         bool flush() final override {
-            throw std::logic_error{ "NullWriter::flush() is not implemented (and shall not be)." };
+            throw std::logic_error{ nameof(NullWriter::flush()) " is not implemented (and shall not be)." };
         }
         ~NullWriter() final override {}
     };
 
-} // anonimous namespace
-
-    class WebEventChannel : public AbstractEventChannel {
+    /**
+     * @brief The class incapsulates web IO for few platforms
+     */
+    class WebIO {
+    private:
 #if defined(__linux__)
         using SocketHandle = int;
 #elif defined(_WIN32)
-        struct SocketHandle {
-            Raii<WSADATA> wsa;
-            Raii<SOCKET> socket;
-        };
-#endif
-        struct EventAttributesHolder {
-            EventAttributes attr; // EventAttributes has no default constructor that's why the EventAttributesHolder is used in std::unordered_map
-            char * stringsBuffer;
-            EventAttributesHolder() : attr{"","","",0,0,0}, stringsBuffer(nullptr) {}
-            ~EventAttributesHolder() { delete[] stringsBuffer; }
-        };
-        SocketHandle m_hdl;
-        std::unordered_map<EventID,EventAttributesHolder> m_locations;
-        std::vector<char> m_argsCache;
-        static const uintptr_t ATTR_MARK = 0xAA115511BB0011EEull;
-        static const uintptr_t OCCU_MARK = 0x00CC0055EE44CCEEull;
-#if defined(__linux__)
-        inline uint32_t os_write(const void * data, uint32_t size) {
-            return ::write(m_hdl, data, size);
-        }
-        inline uint32_t os_read(void * data, uint32_t size) {
-            return ::read(m_hdl, p + done, size - done);
-        }
-#elif defined(_WIN32)
-        inline uint32_t os_write(const void * data, uint32_t size) {
-            return ::send(m_hdl.socket.value, (char*)data, size, 0) == SOCKET_ERROR ? 0 : size;
-        }
-        inline uint32_t os_read(void * data, uint32_t size) {
-            return ::recv(m_hdl.socket.value, (char*)data, size, 0) == SOCKET_ERROR ? 0 : size;
-        }
+        struct SocketHandle { Raii<WSADATA> wsa; Raii<SOCKET> socket; };
 #else
         #error WebEventChannel does not support the platform
 #endif
-        static SocketHandle os_createSender(uint16_t port, uint32_t ipAddr) {
+        SocketHandle m_hdl;
+    private:
+        WebIO(SocketHandle && handle) : m_hdl(std::move(handle)) {}
+    public:
+        explicit WebIO() : m_hdl()
+        {}
+        static inline uint32_t convIPArrayToIPNumber(const uint8_t (&ipAddr)[4])
+        {
+            return ipAddr[0] | (ipAddr[1] << 8) | (ipAddr[2] << 16) | (ipAddr[3] << 24);
+        }
+        static WebIO createSender(uint16_t port, const uint8_t (&ipAddr)[4])
+        {
+            return createSender(port, convIPArrayToIPNumber(ipAddr));
+        }
+        static WebIO createSender(uint16_t port, uint32_t ipAddr) {
 #if defined(__linux__)
             sockaddr_in in;
             in.sin_family = AF_INET;
@@ -128,13 +127,13 @@ namespace {
             int ret = ::connect(sock, (sockaddr*) &in, sizeof(in));
             if (ret < 0) switch (errno)
             {
-                case ECONNREFUSED: throw std::runtime_error{ "Nobody listens on that end." };
+                case ECONNREFUSED: throw std::runtime_error{ nameof(WebIO::createSender) ": Nobody listens on that end." };
                 case EADDRINUSE:
-                case EADDRNOTAVAIL: throw std::runtime_error{ "Address in use." };
+                case EADDRNOTAVAIL: throw std::runtime_error{ nameof(WebIO::createSender) ": Address in use." };
                 case EPERM:
                 case EACCES:
                 case ETIMEDOUT:
-                case ENETUNREACH: throw std::runtime_error{ "Access denied." };
+                case ENETUNREACH: throw std::runtime_error{ nameof(WebIO::createSender) ": Access denied." };
                 case EBADF:
                 case EFAULT:
                 case ENOTSOCK:
@@ -153,7 +152,7 @@ namespace {
                 [](WSADATA&){ ::WSACleanup(); }
             };
             if (::WSAStartup(MAKEWORD(2,2), &wsa.value) != 0) {
-                throw std::runtime_error{ "WinSock2 initialization failed." };
+                throw std::runtime_error{ nameof(WebIO::createSender) ": WinSock2 initialization failed." };
             }
 
             Raii<SOCKET> socket{
@@ -161,12 +160,11 @@ namespace {
                 ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
             };
             if (socket.value == INVALID_SOCKET) {
-                throw std::runtime_error{ "socket failed with error:" };
+                throw std::runtime_error{ nameof(WebIO::createSender) ": socket failed with an error." };
             }
             if (::connect(socket.value,(sockaddr*)&addr,sizeof(addr)) == SOCKET_ERROR) {
                 auto err = GetLastError();
-                return {};
-                throw std::runtime_error{ std::to_string(err) };
+                throw std::runtime_error{ nameof(WebIO::createSender) ": Failed to connect to the socket with the error " + std::to_string(err) };
             }
             return SocketHandle{
                 std::move(wsa),
@@ -174,7 +172,11 @@ namespace {
             };
 #endif
         }
-        static SocketHandle os_createReceiver(uint16_t port, uint32_t ipAddr) {
+        static WebIO createReceiver(uint16_t port, const uint8_t (&ipAddr)[4])
+        {
+            return createReceiver(port, convIPArrayToIPNumber(ipAddr));
+        }
+        static WebIO createReceiver(uint16_t port, uint32_t ipAddr) {
 #if defined(__linux__)
             sockaddr_in in;
             in.sin_family = AF_INET;
@@ -213,7 +215,7 @@ namespace {
                 [](WSADATA&) { ::WSACleanup(); }
             };
             if (WSAStartup(MAKEWORD(2,2), &wsa.value) != 0) {
-                throw std::runtime_error{"WSAStartup failed with error: %d\n"};
+                throw std::runtime_error{nameof(WebIO::createReceiver) ": WSAStartup failed with error: %d\n"};
             }
 
             Raii<SOCKET> listenSock{
@@ -221,13 +223,13 @@ namespace {
                 ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
             };
             if (listenSock.value == INVALID_SOCKET) {
-                return {};
+                return SocketHandle{};
             }
             if (::bind(listenSock.value, (sockaddr*) &addr, sizeof(addr)) == SOCKET_ERROR) {
-                return {};
+                return SocketHandle{};
             }
             if (::listen(listenSock.value, SOMAXCONN) == SOCKET_ERROR) {
-                return {};
+                return SocketHandle{};
             }
 
             Raii<SOCKET> connSocket{
@@ -235,7 +237,7 @@ namespace {
                 ::accept(listenSock.value, NULL, NULL)
             };
             if (connSocket.value == INVALID_SOCKET) {
-                return {};
+                return SocketHandle{};
             }
             return SocketHandle{
                 std::move(wsa),
@@ -243,10 +245,42 @@ namespace {
             };
 #endif
         }
+        inline uint32_t write(const void * data, uint32_t size)
+        {
+#if defined(__linux__)
+            return ::write(m_hdl, data, size);
+#elif defined(_WIN32)
+            return ::send(m_hdl.socket.value, (char*)data, size, 0) == SOCKET_ERROR ? 0 : size;
+#endif
+        }
+        inline uint32_t read(void * data, uint32_t size)
+        {
+#if defined(__linux__)
+            return ::read(m_hdl, p + done, size - done);
+#elif defined(_WIN32)
+            return ::recv(m_hdl.socket.value, (char*)data, size, 0) == SOCKET_ERROR ? 0 : size;
+#endif
+        }
+    };
+
+} // anonimous namespace
+
+    class WebEventChannel : public AbstractEventChannel {
+        struct EventAttributesHolder {
+            EventAttributes attr; // EventAttributes has no default constructor that's why the EventAttributesHolder is used in std::unordered_map
+            char * stringsBuffer;
+            EventAttributesHolder() : attr{"","","",0,0,0}, stringsBuffer(nullptr) {}
+            ~EventAttributesHolder() { delete[] stringsBuffer; }
+        };
+        WebIO m_web;
+        std::unordered_map<EventID,EventAttributesHolder> m_locations;
+        std::vector<char> m_argsCache;
+        static const uintptr_t ATTR_MARK = 0xAA115511BB0011EEull;
+        static const uintptr_t OCCU_MARK = 0x00CC0055EE44CCEEull;
     public:
-        WebEventChannel(uint32_t argsAllocatorCapacity, AbstractEventFormatter & formatter, AbstractWriter & writer, SocketHandle hdl)
+        WebEventChannel(uint32_t argsAllocatorCapacity, AbstractEventFormatter & formatter, AbstractWriter & writer, WebIO && web)
             : AbstractEventChannel(formatter, writer, argsAllocatorCapacity)
-            , m_hdl(std::move(hdl))
+            , m_web(std::move(web))
         {}
         ~WebEventChannel()
         {}
@@ -254,14 +288,14 @@ namespace {
         {
             static NullEventFormatter fmt;
             static NullWriter wtr;
-            auto sock = os_createSender(port, ipAddr);
+            auto sock = WebIO::createSender(port, ipAddr);
             auto p = new WebEventChannel{argsAllocatorCapacity, fmt, wtr, std::move(sock)};
             std::unique_ptr<WebEventChannel> web{p};
             return std::move(web);
         }
         static std::unique_ptr<WebEventChannel> createReceiver(AbstractEventFormatter & formatter, AbstractWriter & writer, uint16_t port, uint32_t ipAddr)
         {
-            auto sock = os_createReceiver(port, ipAddr);
+            auto sock = WebIO::createReceiver(port, ipAddr);
             auto p = new WebEventChannel{0, formatter, writer, std::move(sock)};
             std::unique_ptr<WebEventChannel> web{p};
             return std::move(web);
@@ -269,41 +303,41 @@ namespace {
         static std::unique_ptr<WebEventChannel> createSender(uint32_t argsAllocatorCapacity, uint16_t port, const uint8_t (&ipAddr)[4])
         {
             return std::move(
-                createSender(argsAllocatorCapacity, port, ipAddr[0] | (ipAddr[1] << 8) | (ipAddr[2] << 16) | (ipAddr[3] << 24))
+                createSender(argsAllocatorCapacity, port, WebIO::convIPArrayToIPNumber(ipAddr))
             );
         }
         static std::unique_ptr<WebEventChannel> createReceiver(AbstractEventFormatter & formatter, AbstractWriter & writer, uint16_t port, const uint8_t (&ipAddr)[4])
         {
             return std::move(
-                createReceiver(formatter, writer, port, ipAddr[0] | (ipAddr[1] << 8) | (ipAddr[2] << 16) | (ipAddr[3] << 24))
+                createReceiver(formatter, writer, port, WebIO::convIPArrayToIPNumber(ipAddr))
             );
         }
         bool tryReceiveAndProcessEvent() final override {
             uintptr_t mark;
             uint32_t len[3];
-            os_read(&mark, sizeof(void*));
+            m_web.read(&mark, sizeof(void*));
             switch (mark) {
                 default:
                     throw std::logic_error{ "" };
                 case ATTR_MARK: {
                     EventID attrID;
-                    os_read(&attrID, sizeof(attrID));
+                    m_web.read(&attrID, sizeof(attrID));
                     
                     auto &attrHolder = m_locations[attrID];
                     EventAttributes &attr = attrHolder.attr;
 
                     const_cast<EventID&>(attr.id) = attrID;
 
-                    os_read((void*) &attr.line, sizeof(attr.line));
-                    os_read((void*) &attr.argumentsExpected, sizeof(attr.argumentsExpected));
+                    m_web.read((void*) &attr.line, sizeof(attr.line));
+                    m_web.read((void*) &attr.argumentsExpected, sizeof(attr.argumentsExpected));
 
-                    os_read(len, sizeof(len));
+                    m_web.read(len, sizeof(len));
                     char *p = attrHolder.stringsBuffer = new char[len[0] + len[1] + len[2]];
 
                     #define RECV(str_end,size)\
                         const_cast<char*&>(str_end.str) = p;\
                         const_cast<char*&>(str_end.end) = (p += size);\
-                        os_read(const_cast<char*>(str_end.str), size);
+                        m_web.read(const_cast<char*>(str_end.str), size);
                     RECV(attr.messageFormat, len[0]);
                     RECV(attr.function,      len[1]);
                     RECV(attr.file,          len[2]);
@@ -314,11 +348,11 @@ namespace {
                 case OCCU_MARK: {
                     typename std::remove_const<decltype(EventAttributes::argumentsExpected)>::type argCount = 0;
                     EventID attrID;
-                    os_read(&attrID, sizeof(attrID));
+                    m_web.read(&attrID, sizeof(attrID));
 
-                    os_read(&argCount, sizeof(argCount));
+                    m_web.read(&argCount, sizeof(argCount));
                     std::unique_ptr<Arg[]> args = std::make_unique<Arg[]>(argCount);
-                    os_read(&args[0], sizeof(Arg) * argCount);
+                    m_web.read(&args[0], sizeof(Arg) * argCount);
 
                     uint32_t argsTotalLength = 0;
                     for (uint32_t i = 0; i < argCount; ++i) {
@@ -335,7 +369,7 @@ namespace {
                             auto len = Arg::typeSize(args[i].type) * args[i].arrayLength;
                             args[i].valueOrArray.ArrayPointer = &m_argsCache[argsUsedLength];
                             argsUsedLength += len;
-                            os_read((void*) args[i].valueOrArray.ArrayPointer, len);
+                            m_web.read((void*) args[i].valueOrArray.ArrayPointer, len);
                         }
                     }
                     m_formatter.formatEvent(m_writer, m_locations[attrID].attr, &args[0]);
@@ -345,34 +379,239 @@ namespace {
         }
     private:
         void sendEventAttributes_(const EventAttributes & attr) final override {
-            os_write(&ATTR_MARK, sizeof(void*));
-            os_write(&attr.id,      sizeof(attr.id));
-            os_write(&attr.line,  sizeof(attr.line));
-            os_write(&attr.argumentsExpected, sizeof(attr.argumentsExpected));
+            m_web.write(&ATTR_MARK, sizeof(void*));
+            m_web.write(&attr.id,      sizeof(attr.id));
+            m_web.write(&attr.line,  sizeof(attr.line));
+            m_web.write(&attr.argumentsExpected, sizeof(attr.argumentsExpected));
             uint32_t len[3] = {
                 uint32_t(attr.messageFormat.end - attr.messageFormat.str),
                 uint32_t(attr.function.end      - attr.function.str),
                 uint32_t(attr.file.end          - attr.file.str)
             };
-            os_write(&len[0], sizeof(len));
-            os_write(attr.messageFormat.str, len[0]);
-            os_write(attr.function.str,      len[1]);
-            os_write(attr.file.str,          len[2]);
+            m_web.write(&len[0], sizeof(len));
+            m_web.write(attr.messageFormat.str, len[0]);
+            m_web.write(attr.function.str,      len[1]);
+            m_web.write(attr.file.str,          len[2]);
         }
         void sendEventOccurrence_(const EventAttributes & attr, const Arg args[]) final override {
-            os_write(&OCCU_MARK, sizeof(void*));
-            os_write(&attr.id, sizeof(attr.id));
-            os_write(&attr.argumentsExpected, sizeof(attr.argumentsExpected));
-            os_write(args, sizeof(Arg) * attr.argumentsExpected);
+            m_web.write(&OCCU_MARK, sizeof(void*));
+            m_web.write(&attr.id, sizeof(attr.id));
+            m_web.write(&attr.argumentsExpected, sizeof(attr.argumentsExpected));
+            m_web.write(args, sizeof(Arg) * attr.argumentsExpected);
             for (uint32_t i = 0; i < attr.argumentsExpected; ++i) {
                 register auto isArr = bool(args[i].type & Arg::TypeID::__ISARRAY);
                 if (isArr) {
-                    os_write(args[i].valueOrArray.ArrayPointer, Arg::typeSize(args[i].type) * args[i].arrayLength);
+                    m_web.write(args[i].valueOrArray.ArrayPointer, Arg::typeSize(args[i].type) * args[i].arrayLength);
                 }
             }
             releaseArgs(attr.argumentsExpected);
         }
     };
 
+    class WebTelemetryChannel : public AbstractTelemetryChannel {
+    private:
+        static NullTelemetryFormatter m_fmt;
+        static NullWriter m_wtr;
+        enum class EChannelEnd { Sender, Receiver };
+        WebIO m_web;
+        Arg::TypeID * m_types;
+        Arg * m_sample;
+        Arg m_sampleMark[1];
+        uint16_t m_sampleLength;
+        const EChannelEnd m_channelEnd;
+    private:
+        WebTelemetryChannel(EChannelEnd end, WebIO && web, AbstractTelemetryFormatter & fmt, AbstractWriter & wtr, uint32_t argsAllocatorCapacity, uint16_t sampleLength, const Arg::TypeID types[])
+            : AbstractTelemetryChannel(fmt, wtr, argsAllocatorCapacity)
+            , m_web(std::move(web))
+            , m_types(nullptr)
+            , m_sample(sampleLength ? new Arg[sampleLength] : &m_sampleMark[0])
+            , m_sampleLength(sampleLength)
+            , m_channelEnd(end)
+        {
+            initializeAfterConstruction(sampleLength, types);
+        }
+        void readFull(void * data, uint16_t size)
+        {
+            assert(m_channelEnd == EChannelEnd::Receiver);
+            register auto p = static_cast<uint8_t*>(data);
+            register auto end = p + size;
+            while (p < end)
+            {
+                p += m_web.read(p, end - p);
+            }
+        }
+        void writeJunk(uint32_t size)
+        {
+            assert(m_channelEnd == EChannelEnd::Sender);
+            static const Arg junk{
+                Arg::Value{nullptr},
+                Arg::TypeID::TI_NONE,
+                0
+            };
+            while (size >= sizeof(Arg)) {
+                size -= sizeof(Arg);
+                m_web.write(&junk, sizeof(Arg));
+            }
+            m_web.write(&junk, size);
+        }
+        void readJunk(uint32_t size)
+        {
+            Arg junk;
+            while (size >= sizeof(Arg)) {
+                size -= sizeof(Arg);
+                readFull(&junk, sizeof(Arg));
+                if (junk.valueOrArray.ArrayPointer || (int)junk.type || junk.arrayLength) {
+                    throw std::logic_error{""};
+                }
+            }
+            readFull(&junk, size);
+            if (junk.valueOrArray.ArrayPointer || (int)junk.type || junk.arrayLength) {
+                return;
+            }
+        }
+        virtual void sendSampleTypes_(uint16_t sampleLength, const Arg::TypeID sampleTypes[]) final override
+        {
+            if (sampleLength == 0) {
+                /** We are in the receiver channel end */
+                return;
+            }
+            assert(m_channelEnd == EChannelEnd::Sender);
+
+            auto typesSize = sizeof(Arg::TypeID) * sampleLength;
+            auto sampleSize = sizeof(Arg) * sampleLength;
+
+            Arg markerArg{
+                Arg::Value{ (void*) 0xFAFAFAFA },
+                Arg::TypeID::__TYPE_ID_COUNT,
+                sampleLength
+            };
+
+            m_web.write(&markerArg, sizeof(Arg));
+            m_web.write(sampleTypes, typesSize);
+        }
+        virtual void sendSample_(const Arg values[]) final override
+        {
+            assert(m_channelEnd == EChannelEnd::Sender);
+
+            m_web.write(values, sizeof(Arg) * m_sampleLength);
+            for (uint16_t i = 0; i < m_sampleLength; ++i)
+            {
+                register const Arg & arg = values[i];
+                if (arg.type & Arg::TypeID::__ISARRAY)
+                {
+                    auto size = Arg::typeSize(arg.type) * arg.arrayLength;
+                    m_web.write(arg.valueOrArray.ArrayPointer, size);
+                }
+            }
+        }
+    public:
+        ~WebTelemetryChannel()
+        {
+            delete[] m_types;
+            delete[] m_sample;
+        }
+        /** Constructs the receiver end of the channel */
+        WebTelemetryChannel(uint16_t port, const uint8_t (&ipAddr)[4], AbstractTelemetryFormatter & fmt, AbstractWriter & wtr)
+            : WebTelemetryChannel{
+                EChannelEnd::Receiver,
+                std::move(WebIO::createReceiver(port, ipAddr)),
+                fmt, wtr,
+                0,
+                0, nullptr }
+        {
+            m_sampleLength = 1;
+            m_sample = &m_sampleMark[0];
+        }
+        /** Constructs the sender end of the channel */
+        WebTelemetryChannel(uint16_t port, const uint8_t (&ipAddr)[4], uint32_t argsAllocatorCapacity, uint16_t sampleLength, const Arg::TypeID types[])
+            : WebTelemetryChannel{
+                EChannelEnd::Sender,
+                std::move(WebIO::createSender(port, ipAddr)),
+                m_fmt, m_wtr,
+                argsAllocatorCapacity,
+                sampleLength, types }
+        {
+        }
+        virtual uint16_t sampleLength() const final override
+        {
+            return m_sampleLength;
+        }
+        virtual bool tryProcessSample() final override
+        {
+            assert(m_channelEnd == EChannelEnd::Receiver);
+            assert(m_sampleLength > 0);
+
+            readFull(&m_sample[0], sizeof(Arg) * m_sampleLength);
+
+            if (m_sample[0].type == Arg::TypeID::__TYPE_ID_COUNT && m_sample[0].valueOrArray.ArrayPointer == (void*) 0xFAFAFAFA)
+            {
+                m_sampleLength = m_sample[0].arrayLength;
+                m_sample = new Arg[m_sampleLength];
+                m_types = new Arg::TypeID[m_sampleLength];
+                readFull(&m_types[0], sizeof(Arg::TypeID) * m_sampleLength);
+
+                this->AbstractTelemetryChannel::m_formatter.formatExpectedTypes(this->AbstractTelemetryChannel::m_sink, m_sampleLength, m_types);
+
+                auto succ = tryProcessSample();
+                return succ;
+            }
+            else
+            {
+                for (uint16_t i = 0; i < m_sampleLength; ++i)
+                {
+                    register Arg & arg = m_sample[i];
+                    if (arg.type & Arg::TypeID::__ISARRAY)
+                    {
+                        auto size = Arg::typeSize(arg.type) * arg.arrayLength;
+                        readFull(const_cast<void*&>(arg.valueOrArray.ArrayPointer) = new char[size], size);
+                    }
+                }
+                this->AbstractTelemetryChannel::m_formatter.formatValues(this->AbstractTelemetryChannel::m_sink, m_sample);
+            }
+            return true;
+        }
+    };
+    NullTelemetryFormatter WebTelemetryChannel::m_fmt{};
+    NullWriter WebTelemetryChannel::m_wtr{};
+
 } // namespace logging
 } // namespace _utl
+
+#if defined(CATCH_CONFIG_MAIN)
+
+#include <future>
+
+TEST_CASE("WebTelemetryChannel smoke test", "[web][telemetry][channel]")
+{
+    using namespace _utl::logging;
+    std::packaged_task<void()> producer{
+        []() {
+            std::this_thread::sleep_for(std::chrono::milliseconds{200});
+            Arg::TypeID ids[3] = {
+                Arg::TypeID::TI_arrayof_Char, Arg::TypeID::TI_i64, Arg::TypeID::TI_Thread
+            };
+            WebTelemetryChannel chan{12, {127,0,0,1}, 1024, 3, ids};
+            UTL_logsam(chan, "some text", (int64_t) -3, std::this_thread::get_id());
+            UTL_logsam(chan, "some", (int64_t) -2, std::this_thread::get_id());
+            UTL_logsam(chan, "text", (int64_t) 00, std::this_thread::get_id());
+            UTL_logsam(chan, "`", (int64_t) 65536, std::this_thread::get_id());
+        }
+    };
+    
+    std::stringstream stream;
+    PlainTextTelemetryFormatter fmt;
+    StreamWriter wtr{stream};
+    std::thread producerThread{ std::move(producer) };
+    WebTelemetryChannel chanRecv{12, {127,0,0,1}, fmt, wtr};
+
+    REQUIRE(chanRecv.tryProcessSample());
+    REQUIRE(chanRecv.tryProcessSample());
+    REQUIRE(chanRecv.tryProcessSample());
+    REQUIRE(chanRecv.tryProcessSample());
+
+    producerThread.join();
+
+    std::cout << stream.str() << std::endl;
+}
+
+#endif

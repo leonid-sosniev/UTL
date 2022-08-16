@@ -106,6 +106,10 @@ namespace internal {
         internal::LocklessCircularAllocator<Arg> m_argsAllocator;
         bool m_needsInit;
     public:
+        AbstractTelemetryChannel(const AbstractTelemetryChannel &) = delete;
+        AbstractTelemetryChannel(AbstractTelemetryChannel && rhs) = delete;
+        AbstractTelemetryChannel & operator=(const AbstractTelemetryChannel &) = delete;
+        AbstractTelemetryChannel & operator=(AbstractTelemetryChannel && rhs) = delete;
         AbstractTelemetryChannel(AbstractTelemetryFormatter & formatter, AbstractWriter & sink, uint32_t eventArgsBufferSize)
             : m_formatter(formatter)
             , m_sink(sink)
@@ -116,8 +120,11 @@ namespace internal {
         virtual bool tryProcessSample() = 0;
         Arg * allocateArgs(uint32_t count) { return static_cast<Arg*>(m_argsAllocator.acquire(count)); }
     protected:
-        /** The method MUST be called right after the constructor has done its work */
-        inline void initializeAfterConstruction(uint16_t sampleLength, const Arg::TypeID sampleTypes[]) {
+        /** The method MUST be called right after the constructor has done its work. Calls sendSampleTypes_() */
+        inline void initializeAfterConstruction(uint16_t sampleLength, const Arg::TypeID sampleTypes[])
+        {
+            /** 'sampleLength' and 'sampleTypes' must be both zero or both non-zero"}; */
+            assert((bool)sampleLength == (bool)sampleTypes);
             sendSampleTypes_(sampleLength, sampleTypes);
             m_needsInit = false;
         }
@@ -128,6 +135,10 @@ namespace internal {
             sendSample_(values);
         }
     private:
+        /**
+         * @brief Sends the arg type IDs to the receiver part of the channel
+         * @see initializeAfterConstruction()
+         */
         virtual void sendSampleTypes_(uint16_t sampleLength, const Arg::TypeID sampleTypes[]) = 0;
         virtual void sendSample_(const Arg values[]) = 0;
     };
