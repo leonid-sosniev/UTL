@@ -187,7 +187,7 @@ void VALIDATE_INTERTHREAD_OUTPUT(char * buf) {                           ;
     }                                                                    ;
 }
 
-TEST_CASE("smoke sequential", "[validation]")
+TEST_CASE("smoke sequential", "[interthread][event][channel][validation]")
 {
     static std::array<char,1024> buf;
     std::fill(buf.begin(), buf.end(), '\xDB');
@@ -209,7 +209,7 @@ TEST_CASE("smoke sequential", "[validation]")
     VALIDATE_INTERTHREAD_OUTPUT(p_2);
 }
 
-TEST_CASE("local inter-threaded", "[validation]")
+TEST_CASE("local inter-threaded", "[interthread][event][channel][validation]")
 {
     static std::array<char,1024> buf;
     std::fill(buf.begin(), buf.end(), '\xDB');
@@ -249,7 +249,7 @@ TEST_CASE("local inter-threaded", "[validation]")
     B.join();
 }
 
-TEST_CASE("socket-based (inter-threaded)", "[validation]")
+TEST_CASE("socket-based (inter-threaded)", "[web][event][channel][validation]")
 {
     std::packaged_task<void()> sender{
         []() {
@@ -290,7 +290,7 @@ inline uint64_t rdtsc()
 #endif
 }
 
-TEST_CASE("InterThreadEventChannel benchmark", "[benchmark]")
+TEST_CASE("InterThreadEventChannel benchmark", "[interthread][event][channel][benchmark]")
 {
     unsigned bufferSize = 0;
     const char * name;
@@ -334,6 +334,30 @@ TEST_CASE("InterThreadEventChannel benchmark", "[benchmark]")
     };
 }
 
+TEST_CASE("WebTelemetryChannel benchmark", "[web][telemetry][channel][benchmark]")
+{
+    ThreadWorker C{
+        [](CancellationToken token) {
+            PlainTextTelemetryFormatter fmt;
+            DummyWriter wtr{};
+            auto chan = WebTelemetryChannel::createReceiver(54321, {127,0,0,1}, fmt, wtr);
+            try {
+                while (chan.tryProcessSample() || !token.isCancelled()) {}
+            }
+            catch (std::exception & exc) {
+                std::cout << exc.what() << std::endl;
+            }
+            catch (...) {}
+        }
+    };
+    Arg::TypeID types[4] = {
+        Arg::TypeID::TI_i32, Arg::TypeID::TI_Char, Arg::TypeID::TI_arrayof_Char, Arg::TypeID::TI_f64
+    };
+    auto chan = WebTelemetryChannel::createSender(54321, {127,0,0,1}, 1024, 4, types);
+    BENCHMARK("") {
+        UTL_logsam(chan, -1, 'w', "some words", 0.56);
+    };
+}
 
 inline std::chrono::nanoseconds runEmptyLoop(int iterations)
 {
@@ -342,7 +366,7 @@ inline std::chrono::nanoseconds runEmptyLoop(int iterations)
     return std::chrono::system_clock::now() - t_0;
 }
 
-TEST_CASE("InterThreadTelemetryChannel benchmark", "[benchmark]")
+TEST_CASE("InterThreadTelemetryChannel benchmark", "[interthread][telemetry][channel][benchmark]")
 {
     DummyWriter wtr{};
     PlainTextTelemetryFormatter fmt;

@@ -424,7 +424,7 @@ namespace {
             : AbstractTelemetryChannel(fmt, wtr, argsAllocatorCapacity)
             , m_web(std::move(web))
             , m_types(nullptr)
-            , m_sample(sampleLength ? new Arg[sampleLength] : &m_sampleMark[0])
+            , m_sample(&m_sampleMark[0])
             , m_sampleLength(sampleLength)
             , m_channelEnd(end)
         {
@@ -505,32 +505,47 @@ namespace {
             }
         }
     public:
+        WebTelemetryChannel(WebTelemetryChannel && rhs)
+            : AbstractTelemetryChannel(std::move(rhs))
+            , m_web(std::move(rhs.m_web))
+            , m_types(rhs.m_types)
+            , m_sample(rhs.m_sample)
+            , m_sampleLength(rhs.m_sampleLength)
+            , m_channelEnd(rhs.m_channelEnd)
+        {
+            rhs.m_types = nullptr;
+            rhs.m_sample = nullptr;
+            rhs.m_sampleLength = 0;
+        }
         ~WebTelemetryChannel()
         {
             delete[] m_types;
             delete[] m_sample;
         }
         /** Constructs the receiver end of the channel */
-        WebTelemetryChannel(uint16_t port, const uint8_t (&ipAddr)[4], AbstractTelemetryFormatter & fmt, AbstractWriter & wtr)
-            : WebTelemetryChannel{
+        static WebTelemetryChannel createReceiver(uint16_t port, const uint8_t (&ipAddr)[4], AbstractTelemetryFormatter & fmt, AbstractWriter & wtr)
+        {
+            WebTelemetryChannel ret{
                 EChannelEnd::Receiver,
                 std::move(WebIO::createReceiver(port, ipAddr)),
                 fmt, wtr,
                 0,
-                0, nullptr }
-        {
-            m_sampleLength = 1;
-            m_sample = &m_sampleMark[0];
+                0, nullptr
+            };
+            ret.m_sampleLength = 1;
+            ret.m_sample = &ret.m_sampleMark[0];
+            return std::move(ret);
         }
         /** Constructs the sender end of the channel */
-        WebTelemetryChannel(uint16_t port, const uint8_t (&ipAddr)[4], uint32_t argsAllocatorCapacity, uint16_t sampleLength, const Arg::TypeID types[])
-            : WebTelemetryChannel{
+        static WebTelemetryChannel createSender(uint16_t port, const uint8_t (&ipAddr)[4], uint32_t argsAllocatorCapacity, uint16_t sampleLength, const Arg::TypeID types[])
+        {
+            return WebTelemetryChannel{
                 EChannelEnd::Sender,
                 std::move(WebIO::createSender(port, ipAddr)),
                 m_fmt, m_wtr,
                 argsAllocatorCapacity,
-                sampleLength, types }
-        {
+                sampleLength, types
+            };
         }
         virtual uint16_t sampleLength() const final override
         {
@@ -590,7 +605,7 @@ TEST_CASE("WebTelemetryChannel smoke test", "[web][telemetry][channel]")
             Arg::TypeID ids[3] = {
                 Arg::TypeID::TI_arrayof_Char, Arg::TypeID::TI_i64, Arg::TypeID::TI_Thread
             };
-            WebTelemetryChannel chan{12, {127,0,0,1}, 1024, 3, ids};
+            auto chan = WebTelemetryChannel::createSender(12, {127,0,0,1}, 1024, 3, ids);
             UTL_logsam(chan, "some text", (int64_t) -3, std::this_thread::get_id());
             UTL_logsam(chan, "some", (int64_t) -2, std::this_thread::get_id());
             UTL_logsam(chan, "text", (int64_t) 00, std::this_thread::get_id());
@@ -602,7 +617,7 @@ TEST_CASE("WebTelemetryChannel smoke test", "[web][telemetry][channel]")
     PlainTextTelemetryFormatter fmt;
     StreamWriter wtr{stream};
     std::thread producerThread{ std::move(producer) };
-    WebTelemetryChannel chanRecv{12, {127,0,0,1}, fmt, wtr};
+    auto chanRecv = WebTelemetryChannel::createReceiver(12, {127,0,0,1}, fmt, wtr);
 
     REQUIRE(chanRecv.tryProcessSample());
     REQUIRE(chanRecv.tryProcessSample());

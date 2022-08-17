@@ -106,8 +106,15 @@ namespace internal {
         internal::LocklessCircularAllocator<Arg> m_argsAllocator;
         bool m_needsInit;
     public:
+        AbstractTelemetryChannel(AbstractTelemetryChannel && rhs)
+            : m_formatter(rhs.m_formatter)
+            , m_sink(rhs.m_sink)
+            , m_argsAllocator(std::move(rhs.m_argsAllocator))
+            , m_needsInit(rhs.m_needsInit)
+        {
+            rhs.m_needsInit = true;
+        }
         AbstractTelemetryChannel(const AbstractTelemetryChannel &) = delete;
-        AbstractTelemetryChannel(AbstractTelemetryChannel && rhs) = delete;
         AbstractTelemetryChannel & operator=(const AbstractTelemetryChannel &) = delete;
         AbstractTelemetryChannel & operator=(AbstractTelemetryChannel && rhs) = delete;
         AbstractTelemetryChannel(AbstractTelemetryFormatter & formatter, AbstractWriter & sink, uint32_t eventArgsBufferSize)

@@ -24,12 +24,27 @@ namespace _utl {
             , m_acquireIndex(0)
             , m_releaseIndex(0)
         {}
+        
+        /**
+         * @brief Constructs a new Lockless Circular Allocator object
+         * @pre The object is safe to move only right after its construction (before any method is called)
+         * @param rhs Another object to move the data from
+         */
+        LocklessCircularAllocator(LocklessCircularAllocator && rhs)
+            : m_buf(rhs.m_buf)
+            , m_length(rhs.m_length)
+            , m_actualLength(rhs.m_actualLength.load())
+            , m_acquireIndex(rhs.m_acquireIndex.load())
+            , m_releaseIndex(rhs.m_releaseIndex.load())
+        {
+            std::memset(&rhs, 0, sizeof(rhs));
+        }
         LocklessCircularAllocator(const LocklessCircularAllocator &) = delete;
-        LocklessCircularAllocator(LocklessCircularAllocator &&) = delete;
-        LocklessCircularAllocator & operator=(const LocklessCircularAllocator &) = delete;
-        LocklessCircularAllocator & operator=(LocklessCircularAllocator &&) = delete;
 
-        inline bool isEmpty() { return m_acquireIndex == m_releaseIndex; }
+        LocklessCircularAllocator & operator=(LocklessCircularAllocator &&) = delete;
+        LocklessCircularAllocator & operator=(const LocklessCircularAllocator &) = delete;
+
+        inline bool isEmpty() const { return m_acquireIndex == m_releaseIndex; }
         inline void * acquire(uint32_t length)
         {
             TItem * result = nullptr;
