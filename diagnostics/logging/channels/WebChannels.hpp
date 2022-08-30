@@ -100,27 +100,35 @@ namespace {
         #error WebEventChannel does not support the platform
 #endif
         SocketHandle m_hdl;
+    public:
+        enum class ESockOpts : uint64_t {
+#if defined(_WIN32)
+            Stream = (uint64_t(SOCK_STREAM) << 32) | IPPROTO_TCP,
+            Datagram = (uint64_t(SOCK_DGRAM) << 32) | IPPROTO_UDP,
+#endif
+        };
     private:
+        static inline uint32_t convIPArrayToIPNumber(const uint8_t (&ipAddr)[4]) {
+            return ipAddr[0] | (ipAddr[1] << 8) | (ipAddr[2] << 16) | (ipAddr[3] << 24);
+        }
+        static inline uint32_t getSocketType(ESockOpts p) { return static_cast<uint64_t>(p) >> 32; }
+        static inline uint32_t getProtocol(ESockOpts p) { return static_cast<uint64_t>(p) & 0xFFFFFFFF; }
         WebIO(SocketHandle && handle) : m_hdl(std::move(handle)) {}
     public:
         explicit WebIO() : m_hdl()
         {}
-        static inline uint32_t convIPArrayToIPNumber(const uint8_t (&ipAddr)[4])
+        static WebIO createSender(uint16_t port, const uint8_t (&ipAddr)[4], ESockOpts opts)
         {
-            return ipAddr[0] | (ipAddr[1] << 8) | (ipAddr[2] << 16) | (ipAddr[3] << 24);
+            return createSender(port, convIPArrayToIPNumber(ipAddr), opts);
         }
-        static WebIO createSender(uint16_t port, const uint8_t (&ipAddr)[4])
-        {
-            return createSender(port, convIPArrayToIPNumber(ipAddr));
-        }
-        static WebIO createSender(uint16_t port, uint32_t ipAddr) {
+        static WebIO createSender(uint16_t port, uint32_t ipAddr, ESockOpts opts) {
 #if defined(__linux__)
             sockaddr_in in;
             in.sin_family = AF_INET;
             in.sin_port = htons(port);
             in.sin_addr.s_addr = ipAddr;
 
-            int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+            int sock = ::socket(AF_INET, getSocketType(opts), getProtocol(opts));
             if (sock < 0) {
                 throw std::runtime_error{ ::strerror(errno) };
             }
@@ -157,7 +165,7 @@ namespace {
 
             Raii<SOCKET> socket{
                 [](SOCKET & h) { ::closesocket(h); h = INVALID_SOCKET; },
-                ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+                ::socket(AF_INET, getSocketType(opts), getProtocol(opts))
             };
             if (socket.value == INVALID_SOCKET) {
                 throw std::runtime_error{ nameof(WebIO::createSender) ": socket failed with an error." };
@@ -172,11 +180,11 @@ namespace {
             };
 #endif
         }
-        static WebIO createReceiver(uint16_t port, const uint8_t (&ipAddr)[4])
+        static WebIO createReceiver(uint16_t port, const uint8_t (&ipAddr)[4], ESockOpts opts)
         {
-            return createReceiver(port, convIPArrayToIPNumber(ipAddr));
+            return createReceiver(port, convIPArrayToIPNumber(ipAddr), opts);
         }
-        static WebIO createReceiver(uint16_t port, uint32_t ipAddr) {
+        static WebIO createReceiver(uint16_t port, uint32_t ipAddr, ESockOpts opts) {
 #if defined(__linux__)
             sockaddr_in in;
             in.sin_family = AF_INET;
@@ -186,7 +194,7 @@ namespace {
             socklen_t l = sizeof(in);
             int ret = 0;
 
-            int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+            int sock = ::socket(AF_INET, getSocketType(opts), getProtocol(opts));
             if (sock < 0) {
                 throw std::runtime_error{ ::strerror(errno) };
             }
@@ -220,7 +228,7 @@ namespace {
 
             Raii<SOCKET> listenSock{
                 [](SOCKET & ls) { ::closesocket(ls); ls = INVALID_SOCKET; },
-                ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+                ::socket(AF_INET, getSocketType(opts), getProtocol(opts))
             };
             if (listenSock.value == INVALID_SOCKET) {
                 return SocketHandle{};
@@ -284,33 +292,21 @@ namespace {
         {}
         ~WebEventChannel()
         {}
-        static std::unique_ptr<WebEventChannel> createSender(uint32_t argsAllocatorCapacity, uint16_t port, uint32_t ipAddr)
+        static std::unique_ptr<WebEventChannel> createSender(uint32_t argsAllocatorCapacity, uint16_t port, const uint8_t (&ipAddr)[4])
         {
             static NullEventFormatter fmt;
             static NullWriter wtr;
-            auto sock = WebIO::createSender(port, ipAddr);
+            auto sock = WebIO::createSender(port, ipAddr, WebIO::ESockOpts::Stream);
             auto p = new WebEventChannel{argsAllocatorCapacity, fmt, wtr, std::move(sock)};
             std::unique_ptr<WebEventChannel> web{p};
             return std::move(web);
         }
-        static std::unique_ptr<WebEventChannel> createReceiver(AbstractEventFormatter & formatter, AbstractWriter & writer, uint16_t port, uint32_t ipAddr)
+        static std::unique_ptr<WebEventChannel> createReceiver(AbstractEventFormatter & formatter, AbstractWriter & writer, uint16_t port, const uint8_t (&ipAddr)[4])
         {
-            auto sock = WebIO::createReceiver(port, ipAddr);
+            auto sock = WebIO::createReceiver(port, ipAddr, WebIO::ESockOpts::Stream);
             auto p = new WebEventChannel{0, formatter, writer, std::move(sock)};
             std::unique_ptr<WebEventChannel> web{p};
             return std::move(web);
-        }
-        static std::unique_ptr<WebEventChannel> createSender(uint32_t argsAllocatorCapacity, uint16_t port, const uint8_t (&ipAddr)[4])
-        {
-            return std::move(
-                createSender(argsAllocatorCapacity, port, WebIO::convIPArrayToIPNumber(ipAddr))
-            );
-        }
-        static std::unique_ptr<WebEventChannel> createReceiver(AbstractEventFormatter & formatter, AbstractWriter & writer, uint16_t port, const uint8_t (&ipAddr)[4])
-        {
-            return std::move(
-                createReceiver(formatter, writer, port, WebIO::convIPArrayToIPNumber(ipAddr))
-            );
         }
         bool tryReceiveAndProcessEvent() final override {
             uintptr_t mark;
@@ -414,31 +410,41 @@ namespace {
         static NullWriter m_wtr;
         enum class EChannelEnd { Sender, Receiver };
         WebIO m_web;
-        Arg::TypeID * m_types;
-        Arg * m_sample;
-        Arg m_sampleMark[1];
+        Arg::TypeID * m_receivedTypes;
+        Arg * m_receivedSample;
+        Arg m_sampleHeadBuffer[1];
         uint16_t m_sampleLength;
         const EChannelEnd m_channelEnd;
     private:
         WebTelemetryChannel(EChannelEnd end, WebIO && web, AbstractTelemetryFormatter & fmt, AbstractWriter & wtr, uint32_t argsAllocatorCapacity, uint16_t sampleLength, const Arg::TypeID types[])
             : AbstractTelemetryChannel(fmt, wtr, argsAllocatorCapacity)
             , m_web(std::move(web))
-            , m_types(nullptr)
-            , m_sample(&m_sampleMark[0])
+            , m_receivedTypes(nullptr)
+            , m_receivedSample(&m_sampleHeadBuffer[0])
             , m_sampleLength(sampleLength)
             , m_channelEnd(end)
         {
             initializeAfterConstruction(sampleLength, types);
         }
-        void readFull(void * data, uint16_t size)
+        bool readFull(void * data, uint16_t size, uint16_t tryCount = 8)
         {
             assert(m_channelEnd == EChannelEnd::Receiver);
             register auto p = static_cast<uint8_t*>(data);
             register auto end = p + size;
+            register auto cnt = tryCount;
             while (p < end)
             {
-                p += m_web.read(p, end - p);
+                auto n = m_web.read(p, end - p);
+                if (n) {
+                    cnt = tryCount;
+                } else {
+                    if (--cnt == 0) {
+                        return false;
+                    }
+                }
+                p += n;
             }
+            return true;
         }
         void writeJunk(uint32_t size)
         {
@@ -508,32 +514,35 @@ namespace {
         WebTelemetryChannel(WebTelemetryChannel && rhs)
             : AbstractTelemetryChannel(std::move(rhs))
             , m_web(std::move(rhs.m_web))
-            , m_types(rhs.m_types)
-            , m_sample(rhs.m_sample)
+            , m_receivedTypes(rhs.m_receivedTypes)
+            , m_receivedSample(rhs.m_receivedSample)
             , m_sampleLength(rhs.m_sampleLength)
             , m_channelEnd(rhs.m_channelEnd)
         {
-            rhs.m_types = nullptr;
-            rhs.m_sample = nullptr;
+            if (rhs.m_receivedSample == &rhs.m_sampleHeadBuffer[0]) {
+                m_receivedSample = &this->m_sampleHeadBuffer[0];
+            }
+            rhs.m_receivedTypes = nullptr;
+            rhs.m_receivedSample = nullptr;
             rhs.m_sampleLength = 0;
         }
         ~WebTelemetryChannel()
         {
-            delete[] m_types;
-            delete[] m_sample;
+            delete[] m_receivedTypes;
+            if (&m_sampleHeadBuffer[0] != m_receivedSample) delete[] m_receivedSample;
         }
         /** Constructs the receiver end of the channel */
         static WebTelemetryChannel createReceiver(uint16_t port, const uint8_t (&ipAddr)[4], AbstractTelemetryFormatter & fmt, AbstractWriter & wtr)
         {
             WebTelemetryChannel ret{
                 EChannelEnd::Receiver,
-                std::move(WebIO::createReceiver(port, ipAddr)),
+                std::move(WebIO::createReceiver(port, ipAddr, WebIO::ESockOpts::Datagram)),
                 fmt, wtr,
                 0,
                 0, nullptr
             };
             ret.m_sampleLength = 1;
-            ret.m_sample = &ret.m_sampleMark[0];
+            ret.m_receivedSample = &ret.m_sampleHeadBuffer[0];
             return std::move(ret);
         }
         /** Constructs the sender end of the channel */
@@ -541,7 +550,7 @@ namespace {
         {
             return WebTelemetryChannel{
                 EChannelEnd::Sender,
-                std::move(WebIO::createSender(port, ipAddr)),
+                std::move(WebIO::createSender(port, ipAddr, WebIO::ESockOpts::Datagram)),
                 m_fmt, m_wtr,
                 argsAllocatorCapacity,
                 sampleLength, types
@@ -556,16 +565,19 @@ namespace {
             assert(m_channelEnd == EChannelEnd::Receiver);
             assert(m_sampleLength > 0);
 
-            readFull(&m_sample[0], sizeof(Arg) * m_sampleLength);
+            bool ok = readFull(&m_receivedSample[0], sizeof(Arg) * m_sampleLength);
+            if (!ok) {
+                return false;
+            }
 
-            if (m_sample[0].type == Arg::TypeID::__TYPE_ID_COUNT && m_sample[0].valueOrArray.ArrayPointer == (void*) 0xFAFAFAFA)
+            if (m_receivedSample[0].type == Arg::TypeID::__TYPE_ID_COUNT && m_receivedSample[0].valueOrArray.ArrayPointer == (void*) 0xFAFAFAFA)
             {
-                m_sampleLength = m_sample[0].arrayLength;
-                m_sample = new Arg[m_sampleLength];
-                m_types = new Arg::TypeID[m_sampleLength];
-                readFull(&m_types[0], sizeof(Arg::TypeID) * m_sampleLength);
+                m_sampleLength = m_receivedSample[0].arrayLength;
+                m_receivedSample = new Arg[m_sampleLength];
+                m_receivedTypes = new Arg::TypeID[m_sampleLength];
+                readFull(&m_receivedTypes[0], sizeof(Arg::TypeID) * m_sampleLength);
 
-                this->AbstractTelemetryChannel::m_formatter.formatExpectedTypes(this->AbstractTelemetryChannel::m_sink, m_sampleLength, m_types);
+                this->AbstractTelemetryChannel::m_formatter.formatExpectedTypes(this->AbstractTelemetryChannel::m_sink, m_sampleLength, m_receivedTypes);
 
                 auto succ = tryProcessSample();
                 return succ;
@@ -574,14 +586,14 @@ namespace {
             {
                 for (uint16_t i = 0; i < m_sampleLength; ++i)
                 {
-                    register Arg & arg = m_sample[i];
+                    register Arg & arg = m_receivedSample[i];
                     if (arg.type & Arg::TypeID::__ISARRAY)
                     {
                         auto size = Arg::typeSize(arg.type) * arg.arrayLength;
                         readFull(const_cast<void*&>(arg.valueOrArray.ArrayPointer) = new char[size], size);
                     }
                 }
-                this->AbstractTelemetryChannel::m_formatter.formatValues(this->AbstractTelemetryChannel::m_sink, m_sample);
+                this->AbstractTelemetryChannel::m_formatter.formatValues(this->AbstractTelemetryChannel::m_sink, m_receivedSample);
             }
             return true;
         }
