@@ -101,7 +101,7 @@ namespace {
 #endif
         SocketHandle m_hdl;
     public:
-        enum class ESockOpts : uint64_t {
+        enum class ECommProtocol : uint64_t {
 #if defined(_WIN32)
             Stream = (uint64_t(SOCK_STREAM) << 32) | IPPROTO_TCP,
             Datagram = (uint64_t(SOCK_DGRAM) << 32) | IPPROTO_UDP,
@@ -111,17 +111,14 @@ namespace {
         static inline uint32_t convIPArrayToIPNumber(const uint8_t (&ipAddr)[4]) {
             return ipAddr[0] | (ipAddr[1] << 8) | (ipAddr[2] << 16) | (ipAddr[3] << 24);
         }
-        static inline uint32_t getSocketType(ESockOpts p) { return static_cast<uint64_t>(p) >> 32; }
-        static inline uint32_t getProtocol(ESockOpts p) { return static_cast<uint64_t>(p) & 0xFFFFFFFF; }
+        static inline uint32_t getSocketType(ECommProtocol p) { return static_cast<uint64_t>(p) >> 32; }
+        static inline uint32_t getProtocol(ECommProtocol p) { return static_cast<uint64_t>(p) & 0xFFFFFFFF; }
         WebIO(SocketHandle && handle) : m_hdl(std::move(handle)) {}
     public:
         explicit WebIO() : m_hdl()
         {}
-        static WebIO createSender(uint16_t port, const uint8_t (&ipAddr)[4], ESockOpts opts)
+        static WebIO createSender(ECommProtocol opts, uint16_t port, const uint8_t (&ip)[4])
         {
-            return createSender(port, convIPArrayToIPNumber(ipAddr), opts);
-        }
-        static WebIO createSender(uint16_t port, uint32_t ipAddr, ESockOpts opts) {
 #if defined(__linux__)
             sockaddr_in in;
             in.sin_family = AF_INET;
@@ -180,11 +177,11 @@ namespace {
             };
 #endif
         }
-        static WebIO createReceiver(uint16_t port, const uint8_t (&ipAddr)[4], ESockOpts opts)
+        static WebIO createReceiver(uint16_t port, const uint8_t (&ipAddr)[4], ECommProtocol opts)
         {
             return createReceiver(port, convIPArrayToIPNumber(ipAddr), opts);
         }
-        static WebIO createReceiver(uint16_t port, uint32_t ipAddr, ESockOpts opts) {
+        static WebIO createReceiver(uint16_t port, uint32_t ipAddr, ECommProtocol opts) {
 #if defined(__linux__)
             sockaddr_in in;
             in.sin_family = AF_INET;
@@ -296,14 +293,14 @@ namespace {
         {
             static NullEventFormatter fmt;
             static NullWriter wtr;
-            auto sock = WebIO::createSender(port, ipAddr, WebIO::ESockOpts::Stream);
+            auto sock = WebIO::createSender(port, ipAddr, WebIO::ECommProtocol::Stream);
             auto p = new WebEventChannel{argsAllocatorCapacity, fmt, wtr, std::move(sock)};
             std::unique_ptr<WebEventChannel> web{p};
             return std::move(web);
         }
         static std::unique_ptr<WebEventChannel> createReceiver(AbstractEventFormatter & formatter, AbstractWriter & writer, uint16_t port, const uint8_t (&ipAddr)[4])
         {
-            auto sock = WebIO::createReceiver(port, ipAddr, WebIO::ESockOpts::Stream);
+            auto sock = WebIO::createReceiver(port, ipAddr, WebIO::ECommProtocol::Stream);
             auto p = new WebEventChannel{0, formatter, writer, std::move(sock)};
             std::unique_ptr<WebEventChannel> web{p};
             return std::move(web);
@@ -536,7 +533,7 @@ namespace {
         {
             WebTelemetryChannel ret{
                 EChannelEnd::Receiver,
-                std::move(WebIO::createReceiver(port, ipAddr, WebIO::ESockOpts::Datagram)),
+                std::move(WebIO::createReceiver(port, ipAddr, WebIO::ECommProtocol::Datagram)),
                 fmt, wtr,
                 0,
                 0, nullptr
@@ -550,7 +547,7 @@ namespace {
         {
             return WebTelemetryChannel{
                 EChannelEnd::Sender,
-                std::move(WebIO::createSender(port, ipAddr, WebIO::ESockOpts::Datagram)),
+                std::move(WebIO::createSender(port, ipAddr, WebIO::ECommProtocol::Datagram)),
                 m_fmt, m_wtr,
                 argsAllocatorCapacity,
                 sampleLength, types
