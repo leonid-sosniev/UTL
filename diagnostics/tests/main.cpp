@@ -254,23 +254,23 @@ TEST_CASE("socket-based (inter-threaded)", "[web][event][channel][validation]")
     std::packaged_task<void()> sender{
         []() {
             std::this_thread::sleep_for(std::chrono::seconds{10});
-            auto wchan = WebEventChannel::createSender(1024, 12345, { 127, 0, 0, 1 });
+            auto wchan = std::move(WebEventChannel::createSender(1024, 12345, { 127, 0, 0, 1 }));
             for (int i = 0; i < 2; ++i) {
                 UTL_logev(*wchan, "1234567890-", 1u, -1, 0.2, '3', strArr[i]);
             }
         }
     };
     std::packaged_task<void()> receiver{
-        []() {
+        []() { try {
             std::array<char,1024> buf;
             std::fill(buf.begin(), buf.end(), '\xDB');
             FlatBufferWriter wtr{ buf.data(), buf.size() };
             RawEventFormatter fmt{};
-            auto rchan = WebEventChannel::createReceiver(fmt, wtr, 12345, { 127, 0, 0, 1 });
+            auto rchan = std::move(WebEventChannel::createReceiver(fmt, wtr, 12345, { 127, 0, 0, 1 }));
             for (int i = 0; i < 2; ++i) {
                 while (!rchan->tryReceiveAndProcessEvent()) {}
             }
-        }
+        } catch (std::exception &exc) { std::cout << exc.what() << std::endl; }}
     };
     std::thread th2{ std::move(receiver) };
     std::thread th1{ std::move(sender) };
