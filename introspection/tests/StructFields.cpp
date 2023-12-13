@@ -1,6 +1,8 @@
 #define CATCH_CONFIG_MAIN
 #include <utl/Catch2/single_include/catch2/catch.hpp>
 #include <utl/introspection/StructFields.hpp>
+#include <array>
+#include <cassert>
 #include <sstream>
 
 enum class E : uint8_t {
