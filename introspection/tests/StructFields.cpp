@@ -1,5 +1,7 @@
 #define CATCH_CONFIG_MAIN
-#include <utl/Catch2/single_include/catch2/catch.hpp>
+//#include <utl/Catch2/single_include/catch2/catch.hpp>
+#define TEST_CASE(...) int main()
+#define REQUIRE(x) if (!(x)) { throw std::logic_error{std::to_string(__LINE__)}; }
 #include <utl/introspection/StructFields.hpp>
 #include <array>
 #include <cassert>
