@@ -112,7 +112,7 @@ namespace _utl
 
         template<class Pod> struct GetFieldCount {
         private:
-            static constexpr const size_t MAX_POSSIBLE_FIELD_COUNT = sizeof(Pod)*8;
+            static constexpr const size_t MAX_POSSIBLE_FIELD_COUNT = sizeof(Pod);
             struct Typer {
                 const size_t ix;
                 template<class T> constexpr operator T () { return T{}; }
