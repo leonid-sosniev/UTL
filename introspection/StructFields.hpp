@@ -123,21 +123,21 @@ namespace _utl
             };
             template<size_t SearchRegion_Min, size_t SearchRegion_Max, size_t I, size_t...Is>
             static constexpr
-            auto cnt(std::index_sequence<I,Is...>) -> Result<decltype(Pod{Typer{I},Typer{Is}...})> {
+            auto cnt(std::index_sequence<I,Is...>) -> Result<const decltype(Pod{Typer{I},Typer{Is}...})> {
                 /* current count is less or equal to target one */
                 enum {
                     currCnt = 1+sizeof...(Is),
                     nextCnt = (currCnt + SearchRegion_Max+1) / 2
                 };
                 if (currCnt == nextCnt) {
-                    return Result<Pod>{currCnt};
+                    return Result<const Pod>{currCnt};
                 } else {
                     return cnt<currCnt,SearchRegion_Max>( std::make_index_sequence<nextCnt>() );
                 }
             }
             template<size_t SearchRegion_Min, size_t SearchRegion_Max, size_t...Is>
             static constexpr
-            auto cnt(std::index_sequence<Is...>) -> Result<Pod> {
+            auto cnt(std::index_sequence<Is...>) -> Result<const Pod> {
                 /* current count is greater than target one */
                 enum {
                     currCnt = sizeof...(Is),
@@ -236,10 +236,10 @@ namespace _utl
     struct PodIntrospection
     {
         template<class T> static inline constexpr size_t getFieldCount() {
-            return details::StructFields::getFieldCount<T>();
+            return details::StructFields::getFieldCount<const T>();
         }
         template<class T> static inline constexpr size_t getFieldCountRecursive() {
-            return details::StructFields::getFieldCountRecursive<T>();
+            return details::StructFields::getFieldCountRecursive<const T>();
         }
         template<class Pod> struct StructFieldsMap {
             using FieldsMapItem = int;
@@ -253,8 +253,6 @@ namespace _utl
         */
         template<class Visitor, class Pod> static inline void processTopLevelFields(Visitor & visitor, Pod & pod)
         {
-            static_assert(std::is_class<Pod>::value,
-                "PodIntrospection::processTopLevelFields(): given Pod type is not struct or class!");
             static_assert(std::is_trivially_copyable<Pod>::value,
                 "PodIntrospection::processTopLevelFields(): given Pod type is not trivially copyable!");
             static_assert(std::is_default_constructible<Pod>::value,
