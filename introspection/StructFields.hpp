@@ -122,31 +122,23 @@ namespace _utl
                 constexpr Result(const size_t count_) : count(count_) {}
             };
             template<size_t SearchRegion_Min, size_t SearchRegion_Max, size_t I, size_t...Is>
-            static constexpr
-            auto cnt(std::index_sequence<I,Is...>) -> Result<const decltype(Pod{Typer{I},Typer{Is}...})> {
-                /* current count is less or equal to target one */
-                enum {
-                    currCnt = 1+sizeof...(Is),
-                    nextCnt = (currCnt + SearchRegion_Max+1) / 2
-                };
-                if (currCnt == nextCnt) {
-                    return Result<const Pod>{currCnt};
-                } else {
-                    return cnt<currCnt,SearchRegion_Max>( std::make_index_sequence<nextCnt>() );
-                }
+            static constexpr auto probeWithBinarySearch(std::index_sequence<I,Is...>) -> Result<const decltype(Pod{Typer{I},Typer{Is}...})>
+            {
+                constexpr size_t currCnt = 1+sizeof...(Is);
+                constexpr size_t nextCnt = (currCnt + SearchRegion_Max+1) / 2;
+                return (currCnt == nextCnt)
+                    ? Result<const Pod>{currCnt}
+                    : probeWithBinarySearch<currCnt,SearchRegion_Max>(std::make_index_sequence<nextCnt>());
             }
             template<size_t SearchRegion_Min, size_t SearchRegion_Max, size_t...Is>
-            static constexpr
-            auto cnt(std::index_sequence<Is...>) -> Result<const Pod> {
-                /* current count is greater than target one */
-                enum {
-                    currCnt = sizeof...(Is),
-                    nextCnt = (SearchRegion_Min + currCnt) / 2
-                };
-                return cnt<SearchRegion_Min,currCnt-1>(std::make_index_sequence<nextCnt>());
+            static constexpr auto probeWithBinarySearch(std::index_sequence<Is...>) -> Result<const Pod>
+            {
+                constexpr size_t currCnt = sizeof...(Is);
+                constexpr size_t nextCnt = (SearchRegion_Min + currCnt) / 2;
+                return probeWithBinarySearch<SearchRegion_Min,currCnt-1>(std::make_index_sequence<nextCnt>());
             }
         public:
-            static constexpr size_t value = cnt<0,MAX_POSSIBLE_FIELD_COUNT>( std::make_index_sequence<MAX_POSSIBLE_FIELD_COUNT/2>() ).count;
+            static constexpr size_t value = probeWithBinarySearch<0,MAX_POSSIBLE_FIELD_COUNT>( std::make_index_sequence<MAX_POSSIBLE_FIELD_COUNT/2>() ).count;
         };
 
         template<class Pod> struct GetFieldCountRecursive {
