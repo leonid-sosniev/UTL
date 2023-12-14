@@ -128,14 +128,18 @@ namespace _utl
                 constexpr size_t nextCnt = (currCnt + SearchRegion_Max+1) / 2;
                 return (currCnt == nextCnt)
                     ? Result<const Pod>{currCnt}
-                    : probeWithBinarySearch<currCnt,SearchRegion_Max>(std::make_index_sequence<nextCnt>());
+                    : probeWithBinarySearch<currCnt,SearchRegion_Max>(std::make_index_sequence<nextCnt>())
+                    ;
             }
             template<size_t SearchRegion_Min, size_t SearchRegion_Max, size_t...Is>
             static constexpr auto probeWithBinarySearch(std::index_sequence<Is...>) -> Result<const Pod>
             {
                 constexpr size_t currCnt = sizeof...(Is);
                 constexpr size_t nextCnt = (SearchRegion_Min + currCnt) / 2;
-                return probeWithBinarySearch<SearchRegion_Min,currCnt-1>(std::make_index_sequence<nextCnt>());
+                return (currCnt == nextCnt)
+                    ? Result<const Pod>{currCnt}
+                    : probeWithBinarySearch<SearchRegion_Min,currCnt-1>(std::make_index_sequence<nextCnt>())
+                    ;
             }
         public:
             static constexpr size_t value = probeWithBinarySearch<0,MAX_POSSIBLE_FIELD_COUNT>( std::make_index_sequence<MAX_POSSIBLE_FIELD_COUNT/2>() ).count;
@@ -148,11 +152,16 @@ namespace _utl
                 static constexpr size_t advancedArg(size_t cnt) { return cnt + 1; }
             };
             template<class T> struct Selector<T,false> {
+                //static_assert(std::is_trivially_copyable<T>::value, "Not is_trivially_copyable");
+                //static_assert(std::is_trivially_constructible<T>::value, "Not trivially constructible");
                 static constexpr size_t advancedArg(size_t cnt) { return cnt + getFieldCountRecursive<T>(); }
             };
             struct Typer {
                 size_t *cnt, _;
-                template<class T> constexpr operator T () { *cnt = Selector<T>::advancedArg(*cnt); return T{}; }
+                template<class T>
+                constexpr operator T () {
+                    *cnt = Selector<T>::advancedArg(*cnt); return T{};
+                }
             };
             template<size_t...Is> static constexpr size_t cnt(std::index_sequence<Is...>) {
                 size_t N = 0;
@@ -183,7 +192,8 @@ namespace _utl
 
         template<class Pod, class Visitor> struct FieldsProcessor {
         private:
-            template<class T, bool isStruct = is_struct<T>::value> struct Selector
+            // This is to take into account how substructs affect fields alignment
+            template<class T, bool isStruct = std::is_compound<T>::value> struct Selector
             {};
             template<class T> struct Selector<T,false> {
                 static void * selectThenAlignThenProcess(void * cursor, Visitor & visitor) {
@@ -199,21 +209,22 @@ namespace _utl
                     return alignedPtr<uint8_t>(++field, alignof(T));
                 }
             };
-            struct Typer {
-                void ** cursorPtr;
-                Visitor & visitor;
-                size_t _;
-                template<class T> operator T () {
-                    *cursorPtr = Selector<T>::selectThenAlignThenProcess(*cursorPtr, visitor); return T{};
-                }
-            };
-            template<class P> struct Iterator {
-                template<size_t...Is> static void * iter(void * cursor, Visitor & visitor, std::index_sequence<Is...>) {
+            template<class P> class Iterator {
+                struct Typer {
+                    void ** cursorPtr;
+                    Visitor & visitor;
+                    size_t _;
+                    template<class T> operator T () {
+                        *cursorPtr = Selector<T>::selectThenAlignThenProcess(*cursorPtr, visitor); return T{};
+                    }
+                };
+                template<size_t...Is> static void * iterate_(void * cursor, Visitor & visitor, std::index_sequence<Is...>) {
                     P _{ Typer{&cursor,visitor,Is}... };
                     return cursor;
                 }
+            public:
                 static void * iterate(void * cursor, Visitor & visitor) {
-                    return iter(cursor, visitor, std::make_index_sequence< getFieldCount<P>() >());
+                    return iterate_(cursor, visitor, std::make_index_sequence<getFieldCount<P>()>());
                 }
             };
         public:
@@ -227,31 +238,30 @@ namespace _utl
 
     struct PodIntrospection
     {
+        #define PRECONDITIONS(T) \
+            static_assert(std::is_trivially_copyable<T>::value, "PodIntrospection: given type is not trivially_copyable!"); \
+            static_assert(std::is_standard_layout<T>::value,    "PodIntrospection: given type is not standard_layout!"); \
+            static_assert(std::is_trivial<T>::value,            "PodIntrospection: given type is not trivial!"); \
+        ;
         template<class T> static inline constexpr size_t getFieldCount() {
+            PRECONDITIONS(T)
             return details::StructFields::getFieldCount<const T>();
         }
         template<class T> static inline constexpr size_t getFieldCountRecursive() {
+            PRECONDITIONS(T)
             return details::StructFields::getFieldCountRecursive<const T>();
         }
-        template<class Pod> struct StructFieldsMap {
-            using FieldsMapItem = int;
-            constexpr inline const FieldsMapItem *begin() const { return nullptr; }
-            constexpr inline const FieldsMapItem *end()   const { return nullptr; }
-        };
 
-        /**
-        This iterates over the fields of the given POD object and calls Visitor::process(T&) to perform some actions for every field
-        In order to iterate also over nested structures fields the Visitor class must include process<is_class>(T&) overload
-        */
-        template<class Visitor, class Pod> static inline void processTopLevelFields(Visitor & visitor, Pod & pod)
+        /// @details It iterates over the fields of the given object and calls Visitor::process(T&) to perform some actions for every field.
+        /// In order to iterate also over nested structures fields the Visitor class must include a process<is_class && !is_enum>(T&) overload
+        /// @param visitor Provides us functions handling the Object fields
+        /// @param object The POD object to process
+        template<class Visitor, class Object> static inline void processTopLevelFields(Visitor & visitor, Object & object)
         {
-            static_assert(std::is_trivially_copyable<Pod>::value,
-                "PodIntrospection::processTopLevelFields(): given Pod type is not trivially copyable!");
-            static_assert(std::is_default_constructible<Pod>::value,
-                "PodIntrospection::processTopLevelFields(): given Pod type is not default constructible!");
-            
-            _utl::details::StructFields::FieldsProcessor<Pod,Visitor>::processTopLevelFields(pod, visitor);
+            PRECONDITIONS(Object)
+            _utl::details::StructFields::FieldsProcessor<Object,Visitor>::processTopLevelFields(object, visitor);
         }
+        #undef PRECONDITIONS
     };
 
 } // _utl

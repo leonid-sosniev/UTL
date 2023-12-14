@@ -6,144 +6,137 @@
 #include <array>
 #include <cassert>
 #include <sstream>
+#include <vector>
 
 enum class E : uint8_t {
     A=37, B=1, C=2
 };
-
-struct S {
-    void * _v;
-    const double _d;
-    const char * _c;
-};
-struct M {
-    S * s1;
-    const char * _c;
-    S s2;
-};
-struct D {
-    int _i;
-    S s2;
-    M s1;
-    S * sP;
-};
-struct YYYYY {
-    char _1;
-    char _2;
-    char _3;
-    double d;
-    char _4;
-    char _5;
-};
-struct XXXXX {
-    YYYYY s;
-    char c;
-    double d;
-    uint16_t h;
-    YYYYY s2;
-    int i;
-    const char * cp;
-    E e;
-    void (*f)();
-};
-
-struct X1 {
-    char c;
-    uint32_t u;
-};
-struct X2 {
-    uint32_t u;
-    char c;
-};
-struct Y1 {
-    X1 x;
-    short s;
-    E e;
-};
-struct Y2 {
-    short s;
-    X1 x;
-    E e;
-};
-struct Y3 {
-    X2 x;
-    short s;
-    union U {
-        int k;
-        X2 n;
-    } u;
-    E e;
-};
-struct Y4 {
-    short s;
-    X2 x;
-    std::array<char,4> v;
-    E e;
-};
+std::string to_string(const E& e) {
+    switch (e) {
+        case E::A: return "E::A";
+        case E::B: return "E::B";
+        case E::C: return "E::C";
+        default: std::abort();
+    };
+}
 
 struct Visitor {
     std::stringstream str;
+    bool commaIsNeeded = false;
 public:
-    template<class T> void process(const T * v) {
-        str << v << ' ';
-    }
     template<class T> typename std::enable_if<std::is_fundamental<T>::value>::type process(const T & v) {
-        str << v << ' ';
+        if (commaIsNeeded) str << ", ";
+        str << v;
+        commaIsNeeded = true;
     }
     template<class T> typename std::enable_if<std::is_enum<T>::value>::type process(const T & v) {
-        str << (int) v << ' ';
+        if (commaIsNeeded) str << ", ";
+        str << "\"" << to_string(v) << "\"";
+        commaIsNeeded = true;
     }
     template<class T> typename std::enable_if<std::is_union<T>::value>::type process(const T & v) {
-        str << "union(" << sizeof(T) << ") ";
+        if (commaIsNeeded) str << ", ";
+        str << "union(sizeof=" << sizeof(T) << ")";
+        commaIsNeeded = true;
     }
     template<class T> typename std::enable_if<std::is_class<T>::value && !std::is_enum<T>::value>::type process(const T & v) {
+        if (commaIsNeeded) str << ", ";
+        str << "{";
+        commaIsNeeded = false;
         _utl::PodIntrospection::processTopLevelFields(*this, v);
+        commaIsNeeded = true;
+        str << "}";
     }
-    template<class T, class ...Args> void process(T(*v)(Args...)) {
-        str << (void*) v << ' ';
+    template<
+        class T,
+        typename = typename std::enable_if<!std::is_void<T>::value>::type
+    >
+    void process(const T * v) {
+        process<T>(*v);
+        str << "*";
     }
-    template<class T, class C, class ...Args> void process(T(C::*v)(Args...)) {
-        str << (void*) v << ' ';
+    void process(const void * v) {
+        if (commaIsNeeded) str << ", ";
+        if (v) {
+            str << std::hex << v;
+        } else {
+            str << "nullptr";
+        }
+        commaIsNeeded = true;
+    }
+    template<class T, class...Args> void process(T(*const v)(Args...)) {
+        if (commaIsNeeded) str << ", ";
+        str << "(func)";
+        commaIsNeeded = true;
+    }
+    void process(const char * v) {
+        if (commaIsNeeded) str << ", ";
+        str << '"' << v << '"';
+        commaIsNeeded = true;
+    }
+    void process(const bool v) {
+        if (commaIsNeeded) str << ", ";
+        str << (v ? "true" : "false");
+        commaIsNeeded = true;
     }
     void process(...) {
-        str << "UNEXPECTED ";
+        if (commaIsNeeded) str << ", ";
+        str << "(UNEXPECTED)";
+        commaIsNeeded = true;
     }
 };
 
+struct S0 {};
+struct S1 {
+    float d;
+};
+struct S2 {
+    int i;
+    double d;
+};
+struct S3 {
+    void * vp;
+    bool b;
+    bool b2;
+    const char * cp;
+    const float f;
+    E e;
+    union { int l; double p; } u;
+    S1 *sp;
+    S2 pp;
+    void (*fp)();
+    std::array<char*,4> a
+    ;
+};
+
+void func() {}
+Visitor V;
+char emptyStr[1] = "";
+
+#include <iostream>
+
 TEST_CASE("get number of fields in struct", "introspection")
 {
+    REQUIRE(0  == _utl::PodIntrospection::getFieldCount<S0>());
+    REQUIRE(0  == _utl::PodIntrospection::getFieldCountRecursive<S0>());
+    REQUIRE(1  == _utl::PodIntrospection::getFieldCount<S1>());
+    REQUIRE(1  == _utl::PodIntrospection::getFieldCountRecursive<S1>());
+    REQUIRE(2  == _utl::PodIntrospection::getFieldCount<S2>());
+    REQUIRE(2  == _utl::PodIntrospection::getFieldCountRecursive<S2>());
+    REQUIRE(11 == _utl::PodIntrospection::getFieldCount<S3>());
+    REQUIRE(15 == _utl::PodIntrospection::getFieldCountRecursive<S3>());
 
-    constexpr size_t numS = _utl::PodIntrospection::getFieldCount<S>();
-    constexpr size_t numM = _utl::PodIntrospection::getFieldCount<M>();
-    constexpr size_t numD = _utl::PodIntrospection::getFieldCount<D>();
+    S1 s1{ -4.f };
+    _utl::PodIntrospection::processTopLevelFields(V, s1);
+    V.commaIsNeeded = false; V.str << "\n";
 
-    REQUIRE(numS == 3);
-    REQUIRE(numM == 3);
-    REQUIRE(numD == 4);
+    S2 s2{ 1, 0.5 };
+    _utl::PodIntrospection::processTopLevelFields(V, s2);
+    V.commaIsNeeded = false; V.str << "\n";
 
-    constexpr size_t recS = _utl::PodIntrospection::getFieldCountRecursive<S>();
-    constexpr size_t recM = _utl::PodIntrospection::getFieldCountRecursive<M>();
-    constexpr size_t recD = _utl::PodIntrospection::getFieldCountRecursive<D>();
+    S3 s3{ nullptr, true, false, "hello", 0.1f, E::A, {-1}, &s1, s2, &func, {emptyStr,emptyStr,emptyStr,emptyStr} };
+    _utl::PodIntrospection::processTopLevelFields(V, s3);
+    V.commaIsNeeded = false; V.str << "\n";
 
-    REQUIRE(recS == 3);
-    REQUIRE(recM == 5);
-    REQUIRE(recD == 10);
-
-    Visitor V;
-
-    Y1 a{ {'?',1}, 2, E::A };
-    Y2 b{ 3, {'!',4}, E::A };
-    Y3 c{ {5,'?'}, 6, 1, E::A };
-    Y4 d{ 7, {8,'!'}, { 'w', 'x', 'y', 'z' }, E::A };
-    _utl::PodIntrospection::processTopLevelFields(V, a);
-    _utl::PodIntrospection::processTopLevelFields(V, b);
-    _utl::PodIntrospection::processTopLevelFields(V, c);
-    _utl::PodIntrospection::processTopLevelFields(V, d);
-    REQUIRE(V.str.str() == "? 1 2 37 3 ! 4 37 5 ? 6 union(8) 37 7 8 ! w x y z 37 ");
-
-    V.str.str("");
-
-    XXXXX pod = { { '@', 'b', '$', 5.12, '!', '`' }, '?', 0.5, 1234, { '`', '!', '$', 12.5, 'b', '@' }, -1, "literal", E::A, nullptr };
-    _utl::PodIntrospection::processTopLevelFields(V, pod);
-    REQUIRE(V.str.str() == "@ b $ 5.12 ! ` ? 0.5 1234 ` ! $ 12.5 b @ -1 literal 37 0 ");
+    std::cout << V.str.str() << std::endl;
 }

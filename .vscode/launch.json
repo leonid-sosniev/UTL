@@ -7,7 +7,7 @@
         {
             "id": "ExeName",
             "type": "promptString",
-            "description": "Name of executable in release/",
+            "description": "Name of executable in build/",
         }
     ],
     "configurations": [
@@ -15,9 +15,9 @@
             "name": "cppDebug",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/release/${input:ExeName}",
+            "program": "${workspaceFolder}/build/${input:ExeName}",
             "stopAtEntry": true,
-            "cwd": "${workspaceFolder}/release",
+            "cwd": "${workspaceFolder}/build",
             "externalConsole": false,
             "MIMode": "gdb",
             "setupCommands": [
