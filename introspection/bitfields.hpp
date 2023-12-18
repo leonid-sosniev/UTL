@@ -5,6 +5,10 @@
 #include <cstddef>
 #include <stdexcept>
 
+namespace _utl {
+    enum class Endianness { Big, Little };
+}
+
 namespace {
 
 template<typename TItem, TItem ... tNumbers> struct TypedSum {
@@ -39,73 +43,6 @@ template<typename TItem, TItem tFirst, TItem ...tRest> struct TypedGetByIndex<TI
 };
 template<size_t tIndex, size_t ... tNumbers> using GetByIndex = TypedGetByIndex<size_t, tIndex, tNumbers...>;
 
-template<size_t tBits> constexpr uintmax_t lsh(uintmax_t value) { return value << tBits; }
-template<> constexpr uintmax_t lsh<sizeof(uintmax_t)*8>(uintmax_t value) { return 0; }
-
-template<size_t tWholeBytesNumber> struct LittleEndianValueAccessor {
-    static constexpr uintmax_t read(const uint8_t * bytes) {
-#if defined(LITTLE_ENDIAN)
-        constexpr uintmax_t mask = ~lsh<tWholeBytesNumber*8>(uintmax_t(-1));
-        return *reinterpret_cast<const uintmax_t*>(bytes) & mask;
-#else
-        return *bytes | (LittleEndianValueAccessor<tWholeBytesNumber-1>::read(bytes+1) << 8);
-#endif
-    }
-    static void write(uintmax_t value, uint8_t * bytes) {
-#if defined(LITTLE_ENDIAN)
-        constexpr uintmax_t mask = lsh<tWholeBytesNumber*8>(uintmax_t(-1));
-        auto dst = reinterpret_cast<uintmax_t*>(bytes);
-        *dst = (*dst & ~mask) | (value & mask);
-#else
-        *bytes = value;
-        LittleEndianValueAccessor<tWholeBytesNumber-1>::write(value >> 8, bytes + 1);
-#endif
-    }
-};
-template<> struct LittleEndianValueAccessor<0> {
-    static constexpr uintmax_t read(const uint8_t * bytes) { return 0; }
-    static void write(uintmax_t value, uint8_t * bytes) { }
-};
-
-template<
-    size_t tOffset, size_t tWidth, bool tWithinSingleByte = tOffset + tWidth <= 8
->
-class BitFieldAccessor {
-public:
-    static constexpr uintmax_t read(const uint8_t * bytes)
-    {
-        constexpr uint8_t mask = (1 << tWidth) - 1;
-        return (*bytes >> tOffset) & mask;
-    }
-    static void write(uintmax_t value, uint8_t * bytes)
-    {
-        constexpr uint8_t mask = (1 << tWidth) - 1;
-        *bytes &= ~(mask << tOffset);
-        *bytes |= (value & mask) << tOffset;
-    }
-};
-template<size_t tWidth> class BitFieldAccessor<0, tWidth, false> {
-public:
-    static constexpr uintmax_t read(const uint8_t * bytes) {
-        return LittleEndianValueAccessor<(tWidth + 7) / 8>::read(bytes);
-    }
-    static void write(uintmax_t value, uint8_t * bytes) {
-        LittleEndianValueAccessor<(tWidth + 7) / 8>::write(value, bytes);
-    }
-};
-template<size_t tOffset, size_t tWidth> class BitFieldAccessor<tOffset, tWidth, false> {
-public:
-    static constexpr uintmax_t read(const uint8_t * bytes) {
-        auto head = BitFieldAccessor<tOffset,8-tOffset>::read(bytes);
-        auto rest = LittleEndianValueAccessor<tWidth/8>::read(bytes+1);
-        return head | (rest << (8-tOffset));
-    }
-    static void write(uintmax_t value, uint8_t * bytes) {
-        BitFieldAccessor<tOffset,8-tOffset>::write(value, bytes);
-        LittleEndianValueAccessor<tWidth/8>::write(value >> (8-tOffset), bytes+1);
-    }
-};
-
 template<uintmax_t tValue, uintmax_t tMin, uintmax_t tMax> struct InRange {
     static constexpr bool value = (tMin <= tValue) && (tValue <= tMax);
 };
@@ -113,13 +50,120 @@ template<bool tFirst, bool ...tRest> struct All { static constexpr bool value = 
 template<> struct All<true> { static constexpr bool value = true; };
 template<> struct All<false> { static constexpr bool value = false; };
 
+template<size_t tBits> constexpr uintmax_t left_shift                     (uintmax_t value) { return value << tBits; }
+template<            > constexpr uintmax_t left_shift<sizeof(uintmax_t)*8>(uintmax_t value) { return 0; }
+template<size_t tBits> constexpr uintmax_t right_shift                     (uintmax_t value) { return value >> tBits; }
+template<            > constexpr uintmax_t right_shift<sizeof(uintmax_t)*8>(uintmax_t value) { return 0; }
+
+enum class FieldStructure { SingleByte, Multibyte };
+
+template<
+    _utl::Endianness tEndianness, size_t tOffsetInByte, size_t tWidth,
+    FieldStructure tFieldStructure = (tOffsetInByte + tWidth <= 8) ? FieldStructure::SingleByte : FieldStructure::Multibyte
+>
+class BitFieldAccessor {
+    static constexpr uintmax_t mask = left_shift<tWidth>(1) - 1;
+public:
+    static constexpr uintmax_t read(const uint8_t * bytes) {
+        return right_shift<tOffsetInByte>(*bytes) & mask;
+    }
+    static void write(uintmax_t value, uint8_t * bytes) {
+        *bytes &= ~left_shift<tOffsetInByte>(mask);
+        *bytes |=  left_shift<tOffsetInByte>(value & mask);
+    }
+};
+template<size_t tOffsetInByte, size_t tWidth> class BitFieldAccessor<_utl::Endianness::Little, tOffsetInByte, tWidth, FieldStructure::Multibyte> {
+    static constexpr auto H = 8 - tOffsetInByte;
+public:
+    static constexpr uintmax_t read(const uint8_t * bytes) {
+        uintmax_t head = BitFieldAccessor<_utl::Endianness::Little, tOffsetInByte, H>::read(bytes);
+        uintmax_t rest = BitFieldAccessor<_utl::Endianness::Little, 0,      tWidth-H>::read(bytes+1);
+        return head | (rest << H);
+    }
+    static void write(uintmax_t value, uint8_t * bytes) {
+        BitFieldAccessor<_utl::Endianness::Little, tOffsetInByte,       H>::write(value, bytes);
+        BitFieldAccessor<_utl::Endianness::Little, 0,            tWidth-H>::write(value >> H, bytes+1);
+    }
+};
+template<size_t tOffsetInByte, size_t tWidth> class BitFieldAccessor<_utl::Endianness::Big, tOffsetInByte, tWidth, FieldStructure::Multibyte> {
+    static constexpr auto H = 8 - tOffsetInByte;
+    static constexpr auto R = tWidth - H;
+    static constexpr uintmax_t Rmask = left_shift<R>(1) - 1;
+public:
+    static constexpr uintmax_t read(const uint8_t * bytes) {
+        uintmax_t head = BitFieldAccessor<_utl::Endianness::Big, tOffsetInByte, H>::read(bytes);
+        uintmax_t rest = BitFieldAccessor<_utl::Endianness::Big, 0,             R>::read(bytes+1);
+        return left_shift<R>(head) | rest;
+    }
+    static void write(uintmax_t value, uint8_t * bytes) {
+        BitFieldAccessor<_utl::Endianness::Big, tOffsetInByte, H>::write(value >> R, bytes);
+        BitFieldAccessor<_utl::Endianness::Big, 0,             R>::write(value & Rmask, bytes+1);
+        // will reordering of the 2 above lines improve performance?
+    }
+};
+template<size_t tWidth> class BitFieldAccessor<_utl::Endianness::Little, 0, tWidth, FieldStructure::Multibyte> {
+public:
+    static constexpr uintmax_t read(const uint8_t * bytes) {
+        uintmax_t head = *bytes;
+        uintmax_t rest = BitFieldAccessor<_utl::Endianness::Little, 0, tWidth-8>::read(bytes+1);
+        return head | (rest << 8);
+    }
+    static void write(uintmax_t value, uint8_t * bytes) {
+        *bytes = value;
+        BitFieldAccessor<_utl::Endianness::Little, 0, tWidth-8>::write(value >> 8, bytes+1);
+    }
+};
+template<size_t tWidth> class BitFieldAccessor<_utl::Endianness::Big, 0, tWidth, FieldStructure::Multibyte> {
+    static constexpr auto R = tWidth - 8;
+    static constexpr uintmax_t Rmask = left_shift<R>(1) - 1;
+public:
+    static constexpr uintmax_t read(const uint8_t * bytes) {
+        uintmax_t head = *bytes;
+        uintmax_t rest = BitFieldAccessor<_utl::Endianness::Big, 0, R>::read(bytes+1);
+        return left_shift<R>(head) | rest;
+    }
+    static void write(uintmax_t value, uint8_t * bytes) {
+        *bytes = value >> R;
+        BitFieldAccessor<_utl::Endianness::Big, 0, R>::write(value & Rmask, bytes+1);
+    }
+};
+
+template<size_t tFieldIndex, size_t ...tWidths> struct FieldPositioning {
+    static constexpr auto width = GetByIndex<tFieldIndex, tWidths...>::value;
+    static constexpr auto offset = SumOfFirst<tFieldIndex, tWidths...>::value;
+    static constexpr auto mask = left_shift<width>(1u) - 1;
+};
+
 } // anonymous namespace
 
 
 namespace _utl {
 
-// Packet of little-endian LSB bit fields
-template<size_t ...tWidths> class PortableBitFieldsContainer {
+template<typename TBase, size_t ...tWidths>
+class Bitfields {
+    TBase raw_;
+    static_assert(std::is_unsigned<TBase>::value,                           "The given base type must be unsigned!");
+    static_assert(Sum<tWidths...>::value == sizeof(TBase)*8,                "Total width of the bitfields must be equal to the base type size!");
+    static_assert(All<InRange<tWidths,1,sizeof(TBase)*8>::value...>::value, "All bit field values must be non-zero and fit into the base type");
+public:
+    template<size_t tFieldIndex> constexpr TBase get() const
+    {
+        constexpr FieldPositioning<tFieldIndex,tWidths...> fp;
+        return (raw_ >> fp.offset) & fp.mask;
+    }
+    template<size_t tFieldIndex> constexpr void put(TBase value)
+    {
+        constexpr FieldPositioning<tFieldIndex,tWidths...> fp;
+        if (value > fp.mask) {
+            throw std::logic_error{ "The given value is too great!" };
+        }
+        raw_ = (raw_ & ~(fp.mask << fp.offset)) | (value << fp.offset);
+    }
+    const TBase &raw() const { return raw_; }
+};
+
+// Packet of LSB fields with the given endiannes
+template<Endianness tEndianness, size_t ...tWidths> class PortableBitFieldsContainer {
 private:
     static const size_t DATA_BYTES_LENGTH = (Sum<tWidths...>::value + 7) / 8;
     uint8_t bytes_[DATA_BYTES_LENGTH];
@@ -130,23 +174,21 @@ private:
 public:
     template<size_t tFieldIndex> constexpr uintmax_t get() const
     {
-        constexpr auto width = GetByIndex<tFieldIndex, tWidths...>::value;
-        constexpr auto offset = SumOfFirst<tFieldIndex, tWidths...>::value;
-        constexpr auto byteIndex = offset / 8;
-        constexpr auto inbyteOffset = offset % 8;
-        return BitFieldAccessor<inbyteOffset, width>::read(bytes_ + byteIndex);
+        constexpr FieldPositioning<tFieldIndex, tWidths...> fp;
+        constexpr auto byteIndex = fp.offset / 8;
+        constexpr auto inbyteOffset = fp.offset % 8;
+        return BitFieldAccessor<tEndianness, inbyteOffset, fp.width>::read(bytes_ + byteIndex) & fp.mask;
+        return 0;
     }
     template<size_t tFieldIndex> void put(uintmax_t value)
     {
-        constexpr auto width = GetByIndex<tFieldIndex, tWidths...>::value;
-        constexpr auto offset = SumOfFirst<tFieldIndex, tWidths...>::value;
-        constexpr auto byteIndex = offset / 8;
-        constexpr auto inbyteOffset = offset % 8;
-        constexpr auto maxValidValue = uintmax_t(-1) >> (sizeof(uintmax_t)*8 - width);
-        if (value > maxValidValue) {
+        constexpr FieldPositioning<tFieldIndex, tWidths...> fp;
+        constexpr auto byteIndex = fp.offset / 8;
+        constexpr auto inbyteOffset = fp.offset % 8;
+        if (value > fp.mask) {
             throw std::logic_error{ "The given value is too big for the field" };
         }
-        BitFieldAccessor<inbyteOffset, width>::write(value, bytes_ + byteIndex);
+        BitFieldAccessor<tEndianness, inbyteOffset, fp.width>::write(value, bytes_ + byteIndex);
     }
     const void * data() const { return &bytes_[0]; }
 };

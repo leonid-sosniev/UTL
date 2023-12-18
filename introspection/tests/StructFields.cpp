@@ -114,9 +114,94 @@ Visitor V;
 char emptyStr[1] = "";
 
 #include <iostream>
+#include <cstring>
+#include <utl/introspection/bitfields.hpp>
+
+bool compare(const void * mem, std::initializer_list<uint8_t> bytes)
+{
+    auto a = static_cast<const uint8_t*>(mem);
+    for (const uint8_t b : bytes) {
+        if (b != *a++) return false;
+    }
+    return true;
+}
+uintmax_t revertBytes(uintmax_t x)
+{
+    uint8_t *rt = reinterpret_cast<uint8_t*>(&x) + sizeof(uintmax_t) - 1;
+    uint8_t *lt = reinterpret_cast<uint8_t*>(&x);
+    while (lt < rt) std::swap(*lt++, *rt--);
+    return x;
+}
+
+template<size_t...Ws> using LEFields = _utl::PortableBitFieldsContainer<_utl::Endianness::Little, Ws...>;
+template<size_t...Ws> using BEFields = _utl::PortableBitFieldsContainer<_utl::Endianness::Big, Ws...>;
 
 TEST_CASE("get number of fields in struct", "introspection")
 {
+    {
+    _utl::Bitfields<uint64_t, 1, 8, 32, 23> bits;
+    bits.put<3>(1);
+    bits.put<2>(1);
+    bits.put<1>(0b10000001);
+    bits.put<0>(1);
+    REQUIRE(bits.get<0>() == 1);
+    REQUIRE(bits.get<1>() == 0b10000001);
+    REQUIRE(bits.get<2>() == 1);
+    REQUIRE(bits.get<3>() == 1);
+    REQUIRE(bits.raw() == 0b00000000'00000001'00000000'00000000'00000000'00000001'10000001'1ull);
+    }
+
+    {
+    // one byte
+    LEFields<1,7> s;
+    s.put<0>(1);
+    s.put<1>(0b1100011);
+    s.put<0>(0);
+    REQUIRE(compare(s.data(), {0b11000110}));
+
+    // multibyte
+    uint8_t raw[9] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99 };
+    const uint8_t raw2[9] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99 }; // same array to compare with later
+    auto *m = reinterpret_cast<LEFields<4,64,4>*>(raw);
+
+    REQUIRE(m->get<0>() == 0x1);
+    REQUIRE(m->get<2>() == 0x9);
+    REQUIRE(m->get<1>() == 0x9887766554433221ull);
+
+    m->put<0>(1);
+    REQUIRE(std::memcmp(raw, raw2, 9) == 0);
+    m->put<1>(0x9887766554433221ull);
+    REQUIRE(std::memcmp(raw, raw2, 9) == 0);
+    m->put<2>(9);
+    REQUIRE(std::memcmp(raw, raw2, 9) == 0);
+    }
+
+    {
+    // one byte
+    BEFields<1,7> s;
+    s.put<0>(1);
+    s.put<1>(0b1100011);
+    s.put<0>(0);
+    REQUIRE(compare(s.data(), {0b11000110}));
+
+    // multibyte
+    uint8_t raw[9] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99 };
+    const uint8_t raw2[9] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99 }; // same array to compare with later
+    auto *m = reinterpret_cast<BEFields<4,64,4>*>(raw);
+
+    REQUIRE(m->get<0>() == 0x1);
+    auto n = m->get<1>();
+    REQUIRE(m->get<1>() == 0x1223344556677889ull);
+    REQUIRE(m->get<2>() == 0x9);
+
+    m->put<0>(1);
+    REQUIRE(std::memcmp(raw, raw2, 9) == 0);
+    m->put<1>(0x1223344556677889ull);
+    REQUIRE(std::memcmp(raw, raw2, 9) == 0);
+    m->put<2>(9);
+    REQUIRE(std::memcmp(raw, raw2, 9) == 0);
+    }
+
     REQUIRE(0  == _utl::PodIntrospection::getFieldCount<S0>());
     REQUIRE(0  == _utl::PodIntrospection::getFieldCountRecursive<S0>());
     REQUIRE(1  == _utl::PodIntrospection::getFieldCount<S1>());
