@@ -194,3 +194,25 @@ public:
 };
 
 } // namespace _utl
+
+namespace std {
+
+
+template<
+    size_t tIndex, _utl::Endianness tE, size_t...tW
+>
+uintmax_t get(const _utl::PortableBitFieldsContainer<tE,tW...> & fields)
+{
+    return fields.template get<tIndex>();
+}
+
+template<
+    size_t tIndex, typename T, size_t...tW
+>
+uintmax_t get(const _utl::Bitfields<T,tW...> & fields)
+{
+    return fields.template get<tIndex>();
+}
+
+
+} // namespace std
