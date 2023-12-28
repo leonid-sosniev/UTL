@@ -151,7 +151,7 @@ public:
         constexpr FieldPositioning<tFieldIndex,tWidths...> fp;
         return (raw_ >> fp.offset) & fp.mask;
     }
-    template<size_t tFieldIndex> constexpr void put(TBase value)
+    template<size_t tFieldIndex> void put(TBase value)
     {
         constexpr FieldPositioning<tFieldIndex,tWidths...> fp;
         if (value > fp.mask) {
