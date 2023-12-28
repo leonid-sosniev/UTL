@@ -144,10 +144,10 @@ TEST_CASE("get number of fields in struct", "introspection")
     bits.put<2>(1);
     bits.put<1>(0b10000001);
     bits.put<0>(1);
-    REQUIRE(bits.get<0>() == 1);
-    REQUIRE(bits.get<1>() == 0b10000001);
-    REQUIRE(bits.get<2>() == 1);
-    REQUIRE(bits.get<3>() == 1);
+    REQUIRE(std::get<0>(bits) == 1);
+    REQUIRE(std::get<1>(bits) == 0b10000001);
+    REQUIRE(std::get<2>(bits) == 1);
+    REQUIRE(std::get<3>(bits) == 1);
     REQUIRE(bits.raw() == 0b00000000'00000001'00000000'00000000'00000000'00000001'10000001'1ull);
     }
 
@@ -164,9 +164,9 @@ TEST_CASE("get number of fields in struct", "introspection")
     const uint8_t raw2[9] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99 }; // same array to compare with later
     auto *m = reinterpret_cast<LEFields<4,64,4>*>(raw);
 
-    REQUIRE(m->get<0>() == 0x1);
-    REQUIRE(m->get<2>() == 0x9);
-    REQUIRE(m->get<1>() == 0x9887766554433221ull);
+    REQUIRE(std::get<0>(*m) == 0x1);
+    REQUIRE(std::get<2>(*m) == 0x9);
+    REQUIRE(std::get<1>(*m) == 0x9887766554433221ull);
 
     m->put<0>(1);
     REQUIRE(std::memcmp(raw, raw2, 9) == 0);
@@ -189,10 +189,10 @@ TEST_CASE("get number of fields in struct", "introspection")
     const uint8_t raw2[9] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99 }; // same array to compare with later
     auto *m = reinterpret_cast<BEFields<4,64,4>*>(raw);
 
-    REQUIRE(m->get<0>() == 0x1);
-    auto n = m->get<1>();
-    REQUIRE(m->get<1>() == 0x1223344556677889ull);
-    REQUIRE(m->get<2>() == 0x9);
+    REQUIRE(std::get<0>(*m) == 0x1);
+    auto n = std::get<1>(*m);
+    REQUIRE(std::get<1>(*m) == 0x1223344556677889ull);
+    REQUIRE(std::get<2>(*m) == 0x9);
 
     m->put<0>(1);
     REQUIRE(std::memcmp(raw, raw2, 9) == 0);
