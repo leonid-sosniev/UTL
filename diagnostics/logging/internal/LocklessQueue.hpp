@@ -12,14 +12,22 @@ namespace _utl {
         std::atomic<uint32_t> m_popIndex;
         uint32_t m_capacity;
         TItem * m_items;
+        std::atomic<size_t> m_dbgEnqueueFailCount{0};
+        std::atomic<size_t> m_dbgEnqueueCount{0};
+        std::string m_debugName;
     public:
-        LocklessQueue(uint32_t capacity)
+        LocklessQueue(uint32_t capacity, std::string debugName = "")
             : m_items(new TItem[capacity])
             , m_capacity(capacity)
             , m_usedCount(0)
             , m_popIndex(0)
             , m_pushIndex(0)
+            , m_debugName(std::move(debugName))
         {}
+        ~LocklessQueue()
+        {
+            std::cout << m_debugName << " enc fail/try: " << m_dbgEnqueueFailCount << "/" << m_dbgEnqueueCount << std::endl;
+        }
         bool isEmpty() const { return !m_usedCount; }
         bool tryEnqueue(TItem && item)
         {
@@ -52,7 +60,10 @@ namespace _utl {
             return false;
         }
         inline void enqueue(TItem && item) {
-            while (!tryEnqueue(std::move(item))) {}
+            while (!tryEnqueue(std::move(item))) {
+                ++m_dbgEnqueueFailCount;
+            }
+            ++m_dbgEnqueueCount;
         }
         inline TItem dequeue() {
             TItem item;

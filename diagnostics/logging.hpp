@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include <atomic>
 #include <chrono>
 #include <iostream>
 #include <memory>
@@ -24,10 +25,16 @@ namespace _utl { namespace logging {
 
 namespace internal {
 
+    #include <utl/diagnostics/logging/internal/LocklessQueue.hpp>
     #include <utl/diagnostics/logging/internal/LocklessCircularAllocator.hpp>
 
     template<typename T>
     using LocklessCircularAllocator = _utl::LocklessCircularAllocator<sizeof(T)>;
+    template<typename T>
+    using CircularAllocator = _utl::LocklessCircularAllocator<sizeof(T)>;
+
+    template<typename T>
+    using LocklessQueue = _utl::LocklessQueue<T>;
 
 } // internal namespace
 
@@ -52,102 +59,187 @@ namespace internal {
         static std::atomic<uint32_t> ID_COUNTER;
     public:
         static EventID getNewEventID() { return ID_COUNTER.fetch_add(1); }
-        const Str messageFormat, function, file;
-        const EventID id;
-        const uint32_t line;
-        const size_t argumentsExpected; // must be size_t or else getting it at compile-time fails
+        Str messageFormat, function, file;
+        EventID id;
+        uint32_t line;
+        size_t argumentsExpected; // must be size_t or else getting it at compile-time fails
     };
     std::atomic<uint32_t> EventAttributes::ID_COUNTER{1};
 
+    class MemoryResource {
+    private:
+        friend class Logger;
+        struct Block {
+            const void * data;
+            uint16_t size;
+            uint16_t capacity;
+        };
+        internal::LocklessQueue<Block> queue_;
+        internal::CircularAllocator<char> allocator_;
+        char * lastAllocatedPtr_;
+        uint16_t lastAllocatedSize_;
+    public:
+        MemoryResource(uint32_t formattingBufferSize, uint32_t writtingQueueLength)
+            : allocator_(formattingBufferSize)
+            , queue_(writtingQueueLength, "mem-res")
+            , lastAllocatedPtr_(nullptr)
+            , lastAllocatedSize_(0)
+        {
+        }
+        char * allocate(uint16_t initialSize)
+        {
+            assert(lastAllocatedPtr_ == nullptr);
+            lastAllocatedSize_ += initialSize;
+            lastAllocatedPtr_ = static_cast<char *>(allocator_.acquire(initialSize));
+            return lastAllocatedPtr_;
+        }
+        void submitAllocated(uint16_t meaningfulDataSize)
+        {
+            assert(meaningfulDataSize <= lastAllocatedSize_);
+            queue_.enqueue(
+                Block{lastAllocatedPtr_, meaningfulDataSize, lastAllocatedSize_}
+            );
+            lastAllocatedPtr_ = nullptr;
+            lastAllocatedSize_ = 0;
+        }
+        void submitStaticConstantData(const void * data, uint16_t size)
+        {
+            queue_.enqueue(
+                Block{data, size, 0}
+            );
+        }
+    };
+    
     class AbstractEventFormatter {
+    protected:
+        virtual void formatEventAttributes_(MemoryResource & mem, const EventAttributes & attr) = 0;
+        virtual void formatEvent_(MemoryResource & mem, const EventAttributes & attr, const Arg args[]) = 0;
     public:
+        void formatEventAttributes(MemoryResource & mem, const EventAttributes & attr)
+        {
+            formatEventAttributes_(mem, attr);
+        }
+        void formatEvent(MemoryResource & mem, const EventAttributes & attr, const Arg args[])
+        {
+            formatEvent_(mem, attr, args);
+        }
         virtual ~AbstractEventFormatter() {}
-        virtual void formatEventAttributes(AbstractWriter & wtr, const EventAttributes & attr) = 0;
-        virtual void formatEvent(AbstractWriter & wtr, const EventAttributes & attr, const Arg arg[]) = 0;
     };
-    class AbstractTelemetryFormatter {
-    public:
-        virtual ~AbstractTelemetryFormatter() {}
-        virtual void formatExpectedTypes(AbstractWriter & wtr, uint16_t count, const Arg::TypeID types[]) = 0;
-        virtual void formatValues(AbstractWriter & wtr, const Arg arg[]) = 0;
-    };
+    
+    class Logger {
+    private:
+        struct Ev
+        {
+            const EventAttributes * attr;
+            const Arg * args;
+        };
+        internal::LocklessQueue<Ev> eventQueue_;
+        internal::LocklessCircularAllocator<Arg> argAllocator_;
+        MemoryResource mem_;
+        AbstractEventFormatter * fmt_;
+        AbstractWriter * wtr_;
+        volatile std::atomic<int8_t> isActive_;
+        const std::string debugName_;
+        std::thread threadF_;
+        std::thread threadW_;
+    private:
+        void deactivate() {
+            isActive_.store(-1);
+        }
+        bool isActive() {
+            return isActive_.load() > 0;
+        }
+        void formatterLoop()
+        {
+            Ev ev{};
+            do
+            {
+                if (eventQueue_.tryDequeue(ev))
+                {
+                    assert(ev.attr);
+                    if (ev.args)
+                    {
+                        fmt_->formatEvent(mem_, *ev.attr, ev.args);
+                        argAllocator_.release(ev.attr->argumentsExpected);
+                    }
+                    else
+                    {
+                        fmt_->formatEventAttributes(mem_, *ev.attr);
+                    }
+                }
+                else
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                }
+            }
+            while (isActive());
 
-    class AbstractEventChannel {
-    protected:
-        AbstractEventFormatter & m_formatter;
-        AbstractWriter & m_writer;
-        internal::LocklessCircularAllocator<Arg> m_argsAllocator;
-    public:
-        AbstractEventChannel & operator=(const AbstractEventChannel &) = delete;
-        AbstractEventChannel & operator=(AbstractEventChannel &&) = delete;
-        AbstractEventChannel(const AbstractEventChannel &) = delete;
-        AbstractEventChannel(AbstractEventChannel &&) = delete;
-    public:
-        AbstractEventChannel(AbstractEventFormatter & formatter, AbstractWriter & writer, uint32_t eventArgsBufferSize)
-            : m_formatter(formatter)
-            , m_writer(writer)
-            , m_argsAllocator(eventArgsBufferSize)
-        {}
-        virtual ~AbstractEventChannel() {}
-        virtual bool tryReceiveAndProcessEvent() = 0;
-        inline void sendEventAttributes(const EventAttributes & attr) { sendEventAttributes_(attr); }
-        inline void sendEventOccurrence(const EventAttributes & attr, const Arg args[]) { sendEventOccurrence_(attr, args); }
-        Arg * allocateArgs(uint32_t count) { return static_cast<Arg*>(m_argsAllocator.acquire(count)); }
-    protected:
-        void releaseArgs(uint32_t count) { m_argsAllocator.release(count); }
-    private:
-        virtual void sendEventAttributes_(const EventAttributes & attr) = 0;
-        virtual void sendEventOccurrence_(const EventAttributes & attr, const Arg args[]) = 0;
-    };
-    class AbstractTelemetryChannel {
-    protected:
-        AbstractTelemetryFormatter & m_formatter;
-        AbstractWriter & m_sink;
-        internal::LocklessCircularAllocator<Arg> m_argsAllocator;
-        bool m_needsInit;
-    public:
-        AbstractTelemetryChannel(AbstractTelemetryChannel && rhs)
-            : m_formatter(rhs.m_formatter)
-            , m_sink(rhs.m_sink)
-            , m_argsAllocator(std::move(rhs.m_argsAllocator))
-            , m_needsInit(rhs.m_needsInit)
+            std::cerr << "FMT END" << debugName_ << std::endl;
+        }
+        void writerLoop()
         {
-            rhs.m_needsInit = true;
+            MemoryResource::Block blk;
+            while (true)
+            {
+                if (mem_.queue_.tryDequeue(blk))
+                {
+                    wtr_->write(blk.data, blk.size);
+                    if (blk.capacity)
+                    {
+                        mem_.allocator_.release(blk.capacity);
+                    }
+                }
+                else if (isActive())
+                {
+                    wtr_->flush();
+                }
+                else
+                {
+                    std::cerr << "wtr end " << debugName_ << std::endl;
+                    return;
+                }
+            }
         }
-        AbstractTelemetryChannel(const AbstractTelemetryChannel &) = delete;
-        AbstractTelemetryChannel & operator=(const AbstractTelemetryChannel &) = delete;
-        AbstractTelemetryChannel & operator=(AbstractTelemetryChannel && rhs) = delete;
-        AbstractTelemetryChannel(AbstractTelemetryFormatter & formatter, AbstractWriter & sink, uint32_t eventArgsBufferSize)
-            : m_formatter(formatter)
-            , m_sink(sink)
-            , m_argsAllocator(eventArgsBufferSize / sizeof(Arg))
-            , m_needsInit(true)
-        {}
-        virtual uint16_t sampleLength() const = 0;
-        virtual bool tryProcessSample() = 0;
-        Arg * allocateArgs(uint32_t count) { return static_cast<Arg*>(m_argsAllocator.acquire(count)); }
-    protected:
-        /** The method MUST be called right after the constructor has done its work. Calls sendSampleTypes_() */
-        inline void initializeAfterConstruction(uint16_t sampleLength, const Arg::TypeID sampleTypes[])
-        {
-            /** 'sampleLength' and 'sampleTypes' must be both zero or both non-zero"}; */
-            assert((bool)sampleLength == (bool)sampleTypes);
-            sendSampleTypes_(sampleLength, sampleTypes);
-            m_needsInit = false;
-        }
-        void releaseArgs(uint32_t count) { m_argsAllocator.release(count); }
     public:
-        void sendSample(const Arg values[]) {
-            assert(m_needsInit == false);
-            sendSample_(values);
+        Logger(const Logger &) = delete;
+        Logger(Logger &&) = delete;
+        Logger &operator=(const Logger &) = delete;
+        Logger &operator=(Logger &&) = delete;
+        Logger(AbstractEventFormatter & fmt, AbstractWriter & wtr, uint32_t argsBufferLength, uint32_t eventsBufferLength, uint32_t formattingBufferSize, uint32_t writtingQueueLength, std::string debugName)
+            : fmt_(&fmt)
+            , wtr_(&wtr)
+            , eventQueue_(eventsBufferLength, "log")
+            , argAllocator_(argsBufferLength)
+            , mem_(formattingBufferSize, writtingQueueLength)
+            , threadF_(&Logger::formatterLoop, this)
+            , threadW_(&Logger::writerLoop, this)
+            , isActive_(1)
+            , debugName_(std::move(debugName))
+        {
         }
-    private:
-        /**
-         * @brief Sends the arg type IDs to the receiver part of the channel
-         * @see initializeAfterConstruction()
-         */
-        virtual void sendSampleTypes_(uint16_t sampleLength, const Arg::TypeID sampleTypes[]) = 0;
-        virtual void sendSample_(const Arg values[]) = 0;
+        ~Logger()
+        {
+            std::cerr << "Logger.dtor " << debugName_ << std::endl;
+            deactivate();
+            if (threadW_.joinable())
+            {
+                threadW_.join();
+            }
+            if (threadF_.joinable())
+            {
+                threadF_.join();
+            }
+            std::cerr << "Logger is gone " << debugName_ << std::endl;
+        }
+        Arg * allocateArgsBuffer(const EventAttributes & attr) {
+            return static_cast<Arg *>(argAllocator_.acquire(attr.argumentsExpected));
+        }
+        void registerEventAttributes(const EventAttributes & attr) {
+            eventQueue_.enqueue({&attr,nullptr});
+        }
+        void logEvent(const EventAttributes & attr, const Arg args[]) {
+            eventQueue_.enqueue({&attr,args});
+        }
     };
 
 namespace {
@@ -172,36 +264,16 @@ namespace {
 
     template<class...T> constexpr inline size_t count_of(T &&... items) { return sizeof...(items); }
 
-    template<
-        typename TEventChannel,
-        typename = typename std::enable_if<std::is_base_of<AbstractEventChannel,TEventChannel>::value>::type
-    >
-    inline const EventID registerEvent(TEventChannel & channel, const EventAttributes & attr)
+    inline const EventID registerEvent(Logger & logger, const EventAttributes & attr)
     {
-        channel.AbstractEventChannel::sendEventAttributes(attr);
+        logger.registerEventAttributes(attr);
         return attr.id;
     }
-    template<
-        typename TEventChannel, class...Ts,
-        typename = typename std::enable_if<std::is_base_of<AbstractEventChannel,TEventChannel>::value>::type
-    >
-    inline void logEvent(TEventChannel & channel, const EventAttributes & attributes, Ts &&... args)
+    template<class...Ts> inline void logEvent(Logger & logger, const EventAttributes & attributes, Ts &&... argsPack)
     {
-        Arg * argBuf = channel.AbstractEventChannel::allocateArgs(sizeof...(Ts));
-        _utl::logging::internal::fillArgsBuffer(argBuf, std::forward<Ts&&>(args)...);
-        channel.AbstractEventChannel::sendEventOccurrence(attributes, argBuf);
-    }
-
-    template<
-        class TTelemetryChannel, typename ...Ts,
-        class = typename std::enable_if<std::is_base_of<AbstractTelemetryChannel,TTelemetryChannel>::value>::type
-    >
-    inline void logSample(TTelemetryChannel & channel, Ts &&... args)
-    {
-        assert(channel.sampleLength() == sizeof...(Ts));
-        Arg * argBuf = channel.AbstractTelemetryChannel::allocateArgs(sizeof...(Ts));
-        _utl::logging::internal::fillArgsBuffer(argBuf, std::forward<Ts&&>(args)...);
-        channel.AbstractTelemetryChannel::sendSample(argBuf);
+        Arg * args = logger.allocateArgsBuffer(attributes);
+        _utl::logging::internal::fillArgsBuffer(args, std::forward<Ts&&>(argsPack)...);
+        logger.logEvent(attributes, args);
     }
 }
     #define UTL_logev(CHANNEL, MESSAGE, ...) { \
@@ -215,10 +287,6 @@ namespace {
         }; \
         static auto purposed_to_call_registerEvent_once = _utl::logging::registerEvent(CHANNEL,cpd); \
         _utl::logging::logEvent(CHANNEL,cpd,##__VA_ARGS__); \
-    }
-
-    #define UTL_logsam(CHANNEL, ...) { \
-        _utl::logging::logSample(CHANNEL,##__VA_ARGS__); \
     }
 
 } // logging

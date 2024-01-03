@@ -51,8 +51,8 @@ namespace _utl {
             uint32_t acquireIndex_old = m_acquireIndex;
             for (;;)
             {
-                register uint32_t releaseIndex = m_releaseIndex;
-                register uint32_t acquireIndex_new = acquireIndex_old + length;
+                uint32_t releaseIndex = m_releaseIndex;
+                uint32_t acquireIndex_new = acquireIndex_old + length;
                 if (acquireIndex_old < releaseIndex)
                 {
                     if (acquireIndex_new >= releaseIndex) continue;
@@ -80,11 +80,11 @@ namespace _utl {
             uint32_t releaseIndex_old = m_releaseIndex;
             for (;;)
             {
-                register uint32_t acquireIndex = m_acquireIndex;
+                uint32_t acquireIndex = m_acquireIndex;
                 if (releaseIndex_old == acquireIndex) {
                     return;
                 }
-                register uint32_t releaseIndex_new = releaseIndex_old + length;
+                uint32_t releaseIndex_new = releaseIndex_old + length;
                 if (releaseIndex_old <= acquireIndex)
                 {
                     if (releaseIndex_new > acquireIndex) continue;

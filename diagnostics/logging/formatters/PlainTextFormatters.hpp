@@ -4,7 +4,7 @@
 #include <utl/diagnostics/logging.hpp>
 
 namespace _utl { namespace logging {
-
+/*
 namespace {
 
     static constexpr char hundred[100][2] = {
@@ -69,11 +69,11 @@ namespace {
 
     class PlainTextEventFormatter : public AbstractEventFormatter {
     public:
-        void formatEventAttributes(AbstractWriter &, const EventAttributes &) override {
+        void formatEventAttributes_(const EventAttributes &) override {
             return;
         }
-        void formatEvent(AbstractWriter & wtr, const EventAttributes & attr, const Arg arg[]) override {
-            AbstractWriter * writer = &wtr;
+        void formatEvent_(const EventAttributes & attr, const Arg arg[]) override {
+            AbstractWriter * writer = nullptr;
             char * fmtStr;
             char * fmtEnd;
             char fmtBuf[64];
@@ -209,6 +209,6 @@ namespace {
             writer->write("\n", 1);
         }
     };
-
+*/
 } // namespace logging
 } // namespace _utl
