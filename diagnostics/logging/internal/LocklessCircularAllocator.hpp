@@ -78,30 +78,32 @@ namespace _utl {
         }
         inline void release(uint32_t length)
         {
+            uint32_t acquireIndex;
+            uint32_t releaseIndex_new;
             uint32_t releaseIndex_old = m_releaseIndex;
             for (;;)
             {
                 uint32_t acquireIndex = m_acquireIndex;
                 if (releaseIndex_old == acquireIndex) {
-                    return;
+                    break;
                 }
                 uint32_t releaseIndex_new = releaseIndex_old + length;
                 if (releaseIndex_old <= acquireIndex)
                 {
                     if (releaseIndex_new > acquireIndex) continue;
                     if (m_releaseIndex.compare_exchange_weak(releaseIndex_old, releaseIndex_new) == false) continue;
-                    return;
+                    break;
                 }
                 else // acquireIndex < releaseIndex_old
                 {
                     if (releaseIndex_new < m_actualLength) {
                         if (m_releaseIndex.compare_exchange_weak(releaseIndex_old, releaseIndex_new) == false) continue;
-                        return;
+                        break;
                     } else {
                         releaseIndex_new = length;
                         if (releaseIndex_new > acquireIndex) continue;
                         if (m_releaseIndex.compare_exchange_weak(releaseIndex_old, releaseIndex_new) == false) continue;
-                        return;
+                        break;
                     }
                 }
             }
