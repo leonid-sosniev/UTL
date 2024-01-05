@@ -3,72 +3,92 @@
 #include <cstdint>
 
 #include <atomic>
+#include <memory>
+#include <type_traits>
 
 namespace _utl {
 
-    template<typename TItem> class LocklessQueue {
-        std::atomic<uint32_t> m_usedCount;
-        std::atomic<uint32_t> m_pushIndex;
-        std::atomic<uint32_t> m_popIndex;
-        uint32_t m_capacity;
-        TItem * m_items;
-        std::atomic<size_t> m_dbgEnqueueFailCount{0};
-        std::atomic<size_t> m_dbgEnqueueCount{0};
-        std::string m_debugName;
+    template<typename TItem>
+    class LocklessQueue
+    {
+        static_assert(std::is_trivial<TItem>::value, "The given TItem must be trivial so that dequeueing operation is safe");
+        std::unique_ptr<TItem[]> items_;
+        const uint32_t capacity_;
+        std::atomic<uint32_t> begin_;
+        std::atomic<uint32_t> end_;
+#if defined(DEBUG)
+        std::string debugName_;
+#endif
     public:
         LocklessQueue(uint32_t capacity, std::string debugName = "")
-            : m_items(new TItem[capacity])
-            , m_capacity(capacity)
-            , m_usedCount(0)
-            , m_popIndex(0)
-            , m_pushIndex(0)
-            , m_debugName(std::move(debugName))
-        {}
-        ~LocklessQueue()
+            : items_(new TItem[capacity])
+            , capacity_(capacity)
+            , begin_(0)
+            , end_(0)
+#if defined(DEBUG)
+            , debugName_(std::move(debugName))
+#endif
         {
-            std::cout << m_debugName << " enc fail/try: " << m_dbgEnqueueFailCount << "/" << m_dbgEnqueueCount << std::endl;
         }
-        bool isEmpty() const { return !m_usedCount; }
+        bool isEmpty() const
+        {
+            return begin_ == end_;
+        }
         bool tryEnqueue(TItem && item)
         {
-            uint32_t push = m_pushIndex;
-            auto push_new = (push + 1) % m_capacity;
-            if (push_new != m_popIndex && m_pushIndex.compare_exchange_weak(push, push_new))
+            // places the given item onto items_[start_], moves end_ forward
+            uint32_t begin = begin_;
+            uint32_t end = end_;
+            uint32_t newEnd = (end + 1) % capacity_;
+
+            if (newEnd == begin) // the queue is full
             {
-                m_items[push] = std::move(item);
-                auto m_usedCount_debugValue = m_usedCount.fetch_add(1);
-                assert(m_usedCount_debugValue < m_capacity);
+                return false;
+            }
+            else
+            if (end_.compare_exchange_weak(end, newEnd)) // success
+            {
+                items_[end] = std::move(item);
                 return true;
             }
-            return false;
+            else
+            {
+                return false;
+            }
         }
         bool tryDequeue(TItem & dest)
         {
-            uint32_t usedCount = m_usedCount;
-            if (usedCount > 0 && m_usedCount.compare_exchange_weak(usedCount, usedCount - 1))
+            uint32_t begin = begin_;
+            uint32_t end = end_;
+            uint32_t newBegin = (begin + 1) % capacity_;
+            
+            if (begin == end) // the queue is empty
             {
-                for (uint32_t pop;;)
-                {
-                    pop = m_popIndex;
-                    if (m_popIndex.compare_exchange_weak(pop, (pop + 1) % m_capacity))
-                    {
-                        dest = std::move(m_items[pop]);
-                        return true;
-                    }
-                }
+                return false;
             }
-            return false;
-        }
-        inline void enqueue(TItem && item) {
-            while (!tryEnqueue(std::move(item))) {
-                ++m_dbgEnqueueFailCount;
+            else
+            if (begin_.compare_exchange_weak(begin, newBegin)) // success
+            {
+                return true;
             }
-            ++m_dbgEnqueueCount;
+            else
+            {
+                return false;
+            }
         }
-        inline TItem dequeue() {
+        inline void enqueue(TItem && item)
+        {
+            while (!tryEnqueue(std::forward<TItem &&>(item)))
+            {
+            }
+        }
+        inline TItem dequeue()
+        {
             TItem item;
-            while (!tryDequeue(item)) {}
-            return std::move(item);
+            while (!tryDequeue(item))
+            {
+            }
+            return item;
         }
     };
 
