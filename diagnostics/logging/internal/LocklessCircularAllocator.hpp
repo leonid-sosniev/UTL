@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <atomic>
+#include <memory>
 
 namespace _utl {
 
@@ -12,11 +13,8 @@ namespace _utl {
         std::atomic<uint32_t> m_acquireIndex;
         std::atomic<uint32_t> m_releaseIndex;
         uint32_t const m_length;
-        TItem * const m_buf;
+        std::unique_ptr<TItem[]> m_buf;
     public:
-        ~LocklessCircularAllocator() {
-            delete[] m_buf;
-        }
         LocklessCircularAllocator(uint32_t length)
             : m_buf(new TItem[length])
             , m_length(length)
@@ -57,19 +55,22 @@ namespace _utl {
                 {
                     if (acquireIndex_new >= releaseIndex) continue;
                     if (m_acquireIndex.compare_exchange_weak(acquireIndex_old, acquireIndex_new) == false) continue;
-                    result = m_buf + acquireIndex_old; break;
+                    result = m_buf.get() + acquireIndex_old;
+                    break;
                 }
                 else // releaseIndex <= acquireIndex_old
                 {
                     if (acquireIndex_new < m_length) {
                         if (m_acquireIndex.compare_exchange_weak(acquireIndex_old, acquireIndex_new) == false) continue;
-                        result = m_buf + acquireIndex_old; break;
+                        result = m_buf.get() + acquireIndex_old;
+                        break;
                     } else {
                         m_actualLength.store(acquireIndex_old);
                         acquireIndex_new = length;
                         if (acquireIndex_new >= releaseIndex) continue;
                         if (m_acquireIndex.compare_exchange_weak(acquireIndex_old, acquireIndex_new) == false) continue;
-                        result = m_buf; break;
+                        result = m_buf.get();
+                        break;
                     }
                 }
             }
