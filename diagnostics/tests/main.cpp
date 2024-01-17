@@ -1,6 +1,7 @@
 //#define CATCH_CONFIG_MAIN
 //#define CATCH_CONFIG_ENABLE_BENCHMARKING
 //#include <utl/Catch2/single_include/catch2/catch.hpp>
+#include <utl/tester.hpp>
 
 #include <cassert>
 
@@ -236,12 +237,6 @@ std::unique_ptr<Arg[]> parseEvent(const char * buff, const char ** out_cursor)
     }
     return std::move(result);
 }
-
-#define TEST_CASE_cat_deep(a,b) a ## b
-#define TEST_CASE_cat(a,b) TEST_CASE_cat_deep(a, b)
-#define TEST_CASE(...) void TEST_CASE_cat(test_at_,__LINE__)()
-
-#define REQUIRE(x) assert(x)
 
 #define REQ(T,value) \
     REQUIRE(*(T*)&buf[ofs] == (T)value);\
