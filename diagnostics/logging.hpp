@@ -38,7 +38,7 @@ namespace internal {
         ;
     template<typename T>
     using CircularAllocator =
-        //_utl::LocklessCircularAllocator<sizeof(T)> // sometimes hangs in ~Logger as the writerLoop cannot release from mem_.allocator_
+        //_utl::LocklessCircularAllocator<sizeof(T)> // sometimes hangs in ~Logger as the writerLoop cannot release from mem_.formattedDataAllocator_
         _utl::SimpleAllocator<sizeof(T)>
         ;
 
@@ -86,14 +86,14 @@ namespace internal {
             uint16_t size;
             uint16_t capacity;
         };
-        internal::LocklessQueue<Block> queue_;
-        internal::CircularAllocator<char> allocator_;
+        internal::LocklessQueue<Block> writerDataQueue_;
+        internal::CircularAllocator<char> formattedDataAllocator_;
         char * lastAllocatedPtr_;
         uint16_t lastAllocatedSize_;
     public:
         MemoryResource(uint32_t formattingBufferSize, uint32_t writtingQueueLength)
-            : allocator_(formattingBufferSize)
-            , queue_(writtingQueueLength, "mem-res")
+            : formattedDataAllocator_(formattingBufferSize)
+            , writerDataQueue_(writtingQueueLength, "mem-res")
             , lastAllocatedPtr_(nullptr)
             , lastAllocatedSize_(0)
         {
@@ -102,13 +102,13 @@ namespace internal {
         {
             assert(lastAllocatedPtr_ == nullptr);
             lastAllocatedSize_ += initialSize;
-            lastAllocatedPtr_ = static_cast<char *>(allocator_.acquire(initialSize));
+            lastAllocatedPtr_ = static_cast<char *>(formattedDataAllocator_.acquire(initialSize));
             return lastAllocatedPtr_;
         }
         void submitAllocated(uint16_t meaningfulDataSize)
         {
             assert(meaningfulDataSize <= lastAllocatedSize_);
-            queue_.enqueue(
+            writerDataQueue_.enqueue(
                 Block{lastAllocatedPtr_, meaningfulDataSize, lastAllocatedSize_}
             );
             lastAllocatedPtr_ = nullptr;
@@ -116,7 +116,7 @@ namespace internal {
         }
         void submitStaticConstantData(const void * data, uint16_t size)
         {
-            queue_.enqueue(
+            writerDataQueue_.enqueue(
                 Block{data, size, 0}
             );
         }
@@ -193,12 +193,12 @@ namespace internal {
             while (true)
             {
                 MemoryResource::Block blk{};
-                if (mem_.queue_.tryDequeue(blk))
+                if (mem_.writerDataQueue_.tryDequeue(blk))
                 {
                     wtr_->write(blk.data, blk.size);
                     if (blk.capacity)
                     {
-                        mem_.allocator_.release(blk.capacity);
+                        mem_.formattedDataAllocator_.release(blk.capacity);
                     }
                 }
                 else if (isActive())
