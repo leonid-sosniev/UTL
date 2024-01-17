@@ -28,13 +28,25 @@ namespace internal {
     #include <utl/diagnostics/logging/internal/LocklessQueue.hpp>
     #include <utl/diagnostics/logging/internal/LocklessCircularAllocator.hpp>
 
-    template<typename T>
-    using LocklessCircularAllocator = _utl::LocklessCircularAllocator<sizeof(T)>;
-    template<typename T>
-    using CircularAllocator = _utl::LocklessCircularAllocator<sizeof(T)>;
+    // The combination of LocklessCircularAllocator, SimpleAllocator and BlockingQueue is good
+    // The combination of SimpleAllocator, SimpleAllocator and BlockingQueue is good
 
     template<typename T>
-    using LocklessQueue = _utl::LocklessQueue<T>;
+    using LocklessCircularAllocator =
+        _utl::LocklessCircularAllocator<sizeof(T)>
+        //_utl::SimpleAllocator<sizeof(T)>
+        ;
+    template<typename T>
+    using CircularAllocator =
+        //_utl::LocklessCircularAllocator<sizeof(T)> // sometimes hangs in ~Logger as the writerLoop cannot release from mem_.allocator_
+        _utl::SimpleAllocator<sizeof(T)>
+        ;
+
+    template<typename T>
+    using LocklessQueue =
+        //_utl::LocklessQueue<T> // all the time it tries to release in order different from aquire one
+        _utl::BlockingQueue<T>
+        ;
 
 } // internal namespace
 
@@ -178,9 +190,9 @@ namespace internal {
         }
         void writerLoop()
         {
-            MemoryResource::Block blk;
             while (true)
             {
+                MemoryResource::Block blk{};
                 if (mem_.queue_.tryDequeue(blk))
                 {
                     wtr_->write(blk.data, blk.size);

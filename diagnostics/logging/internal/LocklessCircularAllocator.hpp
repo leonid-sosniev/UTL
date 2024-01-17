@@ -110,4 +110,64 @@ namespace _utl {
         }
     };
 
+    template<size_t SizeofItem> class SimpleAllocator {
+    private:
+        using TItem = uint8_t[SizeofItem];
+        uint32_t length_;
+        const uint32_t capacity_;
+        struct Blk { TItem * ptr; intmax_t size; };
+        std::list<Blk> segments_;
+        std::mutex mutex_;
+    public:
+        SimpleAllocator(uint32_t length)
+            : capacity_(length)
+            , length_(0)
+        {}
+        SimpleAllocator(SimpleAllocator &&) = delete;
+        SimpleAllocator(const SimpleAllocator &) = delete;
+        SimpleAllocator & operator=(SimpleAllocator &&) = delete;
+        SimpleAllocator & operator=(const SimpleAllocator &) = delete;
+
+        inline bool isEmpty() const
+        {
+            std::unique_lock<std::mutex> lock{mutex_};
+            return length_ == 0;
+        }
+        inline void * acquire(uint32_t length)
+        {
+            while (true)
+            {
+                std::unique_lock<std::mutex> lock{mutex_};
+                if (length_ < capacity_ - length)
+                {
+                    auto p = new TItem[length];
+                    segments_.push_back(Blk{p, length});
+                    length_ += length;
+                    return p;
+                }
+                else
+                {
+                    std::this_thread::yield();
+                }
+            }
+        }
+        inline void release(uint32_t length)
+        {
+            while (length)
+            {
+                std::unique_lock<std::mutex> lock{mutex_};
+                if (segments_.size())
+                {
+                    Blk & seg = segments_.front();
+                    assert(seg.size == length);
+
+                    length_ -= seg.size;
+                    length = 0;
+                    delete[] seg.ptr;
+                    segments_.pop_front();
+                }
+            }
+        }
+    };
+
 } // _utl namespace
