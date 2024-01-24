@@ -33,6 +33,7 @@ namespace ch = std::chrono;
 
 const char * strArr[2] = { "4", "some text" };
 
+/*
 namespace {
     class CancellationToken {
         std::atomic_bool & m_flag;
@@ -71,7 +72,7 @@ namespace {
             void(*func)(CancellationToken, InputDataType &);
         };
         using Worker = std::thread;
-        internal::LocklessQueue<WorkItem> m_workItems;
+        internal::ManyReadersManyWritersQueue<WorkItem> m_workItems;
         std::condition_variable m_workersCVar;
         std::mutex m_workersMutex;
         std::vector<Worker> m_workers;
@@ -137,6 +138,7 @@ namespace {
         }
     };
 }
+*/
 class RawEventFormatter
     : public AbstractEventFormatter
 {
@@ -301,7 +303,7 @@ int main()
 */
     _utl::DummyWriter dwtr;
 
-    Logger l{fmt, dwtr, 1024*5, 1024, 65536, 1024, "L"};
+    Logger l{fmt, dwtr, 1024*5, 1024, 65536, 1024};//, "L"};
 
     auto t_0 = std::chrono::steady_clock::now();
     size_t N = 1'000'000;

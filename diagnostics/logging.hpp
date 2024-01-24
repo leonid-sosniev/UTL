@@ -21,34 +21,25 @@
 #include <utl/io/Writer.hpp>
 #include <utl/io/Reader.hpp>
 
+#include <utl/diagnostics/logging/internal/LocklessQueue.hpp>
+#include <utl/diagnostics/logging/internal/LocklessCircularAllocator.hpp>
+
+#define DBG(x)
+
+namespace {
+
+    template<typename T>
+    using ManyReadersManyWritersAllocator = _utl::SimpleAllocator<sizeof(T)>;
+    template<typename T>
+    using SingleReaderSingleWriterAllocator = _utl::ThreadSafeCircularAllocator<sizeof(T)>;
+    template<typename T>
+    using ManyReadersManyWritersQueue = _utl::ThreadSafeCircularQueue<T, _utl::ThreadSafeQueueStrategy_ManyReadersManyWriters>;
+    template<typename T>
+    using SingleReaderSingleWriterQueue = _utl::ThreadSafeCircularQueue<T, _utl::ThreadSafeQueueStrategy_LocklessSingleReaderSingleWriter>;
+
+} // namespace internal
+
 namespace _utl { namespace logging {
-
-namespace internal {
-
-    #include <utl/diagnostics/logging/internal/LocklessQueue.hpp>
-    #include <utl/diagnostics/logging/internal/LocklessCircularAllocator.hpp>
-
-    // The combination of LocklessCircularAllocator, SimpleAllocator and BlockingQueue is good
-    // The combination of SimpleAllocator, SimpleAllocator and BlockingQueue is good
-
-    template<typename T>
-    using LocklessCircularAllocator =
-        _utl::LocklessCircularAllocator<sizeof(T)>
-        //_utl::SimpleAllocator<sizeof(T)>
-        ;
-    template<typename T>
-    using CircularAllocator =
-        //_utl::LocklessCircularAllocator<sizeof(T)> // sometimes hangs in ~Logger as the writerLoop cannot release from mem_.formattedDataAllocator_
-        _utl::SimpleAllocator<sizeof(T)>
-        ;
-
-    template<typename T>
-    using LocklessQueue =
-        //_utl::LocklessQueue<T> // all the time it tries to release in order different from aquire one
-        _utl::BlockingQueue<T>
-        ;
-
-} // internal namespace
 
     using TimePoint = uint64_t;
     using ThreadId = uint32_t;
@@ -86,8 +77,8 @@ namespace internal {
             uint16_t size;
             uint16_t capacity;
         };
-        internal::LocklessQueue<Block> writerDataQueue_;
-        internal::CircularAllocator<char> formattedDataAllocator_;
+        SingleReaderSingleWriterQueue<Block> writerDataQueue_;
+        SingleReaderSingleWriterAllocator<char> formattedDataAllocator_;
         char * lastAllocatedPtr_;
         uint16_t lastAllocatedSize_;
     public:
@@ -103,6 +94,7 @@ namespace internal {
             assert(lastAllocatedPtr_ == nullptr);
             lastAllocatedSize_ += initialSize;
             lastAllocatedPtr_ = static_cast<char *>(formattedDataAllocator_.acquire(initialSize));
+            assert(lastAllocatedPtr_ != nullptr);
             return lastAllocatedPtr_;
         }
         void submitAllocated(uint16_t meaningfulDataSize)
@@ -145,15 +137,15 @@ namespace internal {
             const EventAttributes * attr;
             const Arg * args;
         };
-        internal::LocklessQueue<Ev> eventQueue_;
-        internal::LocklessCircularAllocator<Arg> argAllocator_;
+        SingleReaderSingleWriterQueue<Ev> eventQueue_;
+        SingleReaderSingleWriterAllocator<Arg> argAllocator_;
         MemoryResource mem_;
         AbstractEventFormatter * fmt_;
         AbstractWriter * wtr_;
         volatile std::atomic<int8_t> isActive_;
-        const std::string debugName_;
         std::thread threadF_;
         std::thread threadW_;
+        //const std::string debugName_;
     private:
         void deactivate() {
             isActive_.store(-1);
@@ -163,6 +155,7 @@ namespace internal {
         }
         void formatterLoop()
         {
+            DBG_FUNC("fmt loop")
             Ev ev{};
             do
             {
@@ -185,11 +178,10 @@ namespace internal {
                 }
             }
             while (isActive());
-
-            std::cerr << "FMT END" << debugName_ << std::endl;
         }
         void writerLoop()
         {
+            DBG_FUNC("wtr loop")
             while (true)
             {
                 MemoryResource::Block blk{};
@@ -207,7 +199,6 @@ namespace internal {
                 }
                 else
                 {
-                    std::cerr << "wtr end " << debugName_ << std::endl;
                     return;
                 }
             }
@@ -217,21 +208,21 @@ namespace internal {
         Logger(Logger &&) = delete;
         Logger &operator=(const Logger &) = delete;
         Logger &operator=(Logger &&) = delete;
-        Logger(AbstractEventFormatter & fmt, AbstractWriter & wtr, uint32_t argsBufferLength, uint32_t eventsBufferLength, uint32_t formattingBufferSize, uint32_t writtingQueueLength, std::string debugName)
+        Logger(AbstractEventFormatter & fmt, AbstractWriter & wtr, uint32_t argsBufferLength, uint32_t eventsBufferLength, uint32_t formattingBufferSize, uint32_t writtingQueueLength)//, std::string debugName)
             : fmt_(&fmt)
             , wtr_(&wtr)
-            , eventQueue_(eventsBufferLength, "log")
-            , argAllocator_(argsBufferLength)
+            , eventQueue_(eventsBufferLength)//, "log")
+            , argAllocator_(argsBufferLength)//, "arg alloc")
             , mem_(formattingBufferSize, writtingQueueLength)
             , threadF_(&Logger::formatterLoop, this)
             , threadW_(&Logger::writerLoop, this)
             , isActive_(1)
-            , debugName_(std::move(debugName))
+            //, debugName_(std::move(debugName))
         {
         }
         ~Logger()
         {
-            std::cerr << "Logger.dtor " << debugName_ << std::endl;
+            //std::cerr << "Logger.dtor " << debugName_ << std::endl;
             deactivate();
             if (threadW_.joinable())
             {
@@ -241,9 +232,10 @@ namespace internal {
             {
                 threadF_.join();
             }
-            std::cerr << "Logger is gone " << debugName_ << std::endl;
+            //std::cerr << "Logger is gone " << debugName_ << std::endl;
         }
         Arg * allocateArgsBuffer(const EventAttributes & attr) {
+            DBG_FUNC((std::stringstream{} << "client-" << std::this_thread::get_id()).str());
             return static_cast<Arg *>(argAllocator_.acquire(attr.argumentsExpected));
         }
         void registerEventAttributes(const EventAttributes & attr) {

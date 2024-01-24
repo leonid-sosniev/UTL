@@ -19,8 +19,8 @@ namespace _utl {
 
     class ThreadSafeQueueStrategy_ManyReadersManyWriters
     {
-        std::atomic_flag isAdding_;
-        std::atomic_flag isRemoving_;
+        std::atomic_flag isAdding_{false};
+        std::atomic_flag isRemoving_{false};
     public:
         bool isAllowedToEnqueue()
         {
@@ -43,30 +43,29 @@ namespace _utl {
     };
 
     template<typename TItem, typename Strategy = ThreadSafeQueueStrategy_ManyReadersManyWriters>
-    class LocklessQueue
+    class ThreadSafeCircularQueue
     {
         static_assert(std::is_trivial<TItem>::value, "The given TItem must be trivial so that dequeueing operation is safe");
         std::unique_ptr<TItem[]> items_;
         const uint32_t capacity_;
         std::atomic<uint32_t> begin_;
         std::atomic<uint32_t> end_;
-        std::atomic_flag endGuard_;
-        std::atomic_flag beginGuard_;
+        Strategy rwStrategy_;
 #if defined(DEBUG)
         std::string debugName_;
 #endif
     public:
-        LocklessQueue(uint32_t capacity, std::string debugName = "")
+        ThreadSafeCircularQueue(uint32_t capacity, std::string debugName = "")
             : items_(new TItem[capacity])
             , capacity_(capacity)
-            , begin_(0), beginGuard_(false)
-            , end_(0), endGuard_(false)
+            , begin_(0)
+            , end_(0)
 #if defined(DEBUG)
             , debugName_(std::move(debugName))
 #endif
         {
         }
-        bool tryEnqueue(TItem && item)
+        bool tryEnqueue(const TItem & item)
         {
             // places the given item onto items_[start_], moves end_ forward
             uint32_t begin = begin_;
@@ -77,16 +76,15 @@ namespace _utl {
             if (newEnd != begin)
             // not full
             {
-                if (endGuard_.test_and_set() == 0)
-                // allowed to enqueue
+                if (rwStrategy_.isAllowedToEnqueue())
                 {
-                    if (end_.compare_exchange_weak(end, newEnd))
+                    items_[end] = item;
+                    if (end_.compare_exchange_strong(end, newEnd))
                     // do enqueue
                     {
-                        items_[end] = std::move(item);
                         result = true;
                     }
-                    endGuard_.clear();
+                    rwStrategy_.finishEnqueue();
                 }
                 else
                 {
@@ -105,16 +103,16 @@ namespace _utl {
             if (begin != end)
             // the queue is not empty
             {
-                if (beginGuard_.test_and_set() == 0)
+                if (rwStrategy_.isAllowedToDequeue())
                 // allowed to dequeue
                 {
-                    if (begin_.compare_exchange_weak(begin, newBegin))
+                    dest = items_[begin];
+                    if (begin_.compare_exchange_strong(begin, newBegin))
                     // do dequeue
                     {
-                        dest = std::move(items_[begin]);
                         result = true;
                     }
-                    beginGuard_.clear();
+                    rwStrategy_.finishDequeue();
                 }
             }
             return result;
