@@ -55,6 +55,7 @@ namespace _utl {
         std::string debugName_;
 #endif
     public:
+        std::function<void()> onOverflowEvent;
         ThreadSafeCircularQueue(uint32_t capacity, std::string debugName = "")
             : items_(new TItem[capacity])
             , capacity_(capacity)
@@ -91,6 +92,7 @@ namespace _utl {
                     return false;
                 }
             }
+            if (!result && onOverflowEvent) onOverflowEvent();
             return result;
         }
         bool tryDequeue(TItem & dest)

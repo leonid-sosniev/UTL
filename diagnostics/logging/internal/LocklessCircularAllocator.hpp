@@ -54,6 +54,7 @@ namespace _utl {
         std::atomic_flag isAllocating_;
         std::atomic_flag isDeallocating_;
     public:
+        std::function<void()> onOverflowEvent;
         ThreadSafeCircularAllocator(uint32_t capacity)
             : buf_(new TItem[capacity])
             , capacity_(capacity)
@@ -127,9 +128,10 @@ namespace _utl {
         }
         void * tryAllocate(uint32_t length)
         {
-            assert(length);
-            //DBG auto requestedLength = length;
-            //DBG length += sizeof(uint32_t);
+            if (!length)
+            {
+                return &buf_[capacity_];
+            }
             void * result = nullptr;
             uint32_t beg = begin_;
             uint32_t end = end_;
@@ -163,15 +165,15 @@ namespace _utl {
                 }
                 isAllocating_.clear();
             }
-            //DBG std::fill((char*)result, (char*)result + length, '0');
-            //DBG *static_cast<uint32_t*>(result) = requestedLength;
-            //DBG return static_cast<uint32_t*>(result) + 1;
+            if (!result && onOverflowEvent) onOverflowEvent();
             return result;
         }
         bool tryDeallocate(uint32_t length)
         {
-            //DBG auto requestedLength = length;
-            //DBG length += sizeof(uint32_t);
+            if (!length)
+            {
+                return true;
+            }
             bool result = false;
             uint32_t beg = begin_;
             uint32_t end = end_;
@@ -182,19 +184,6 @@ namespace _utl {
             else
             // end < beg
             {
-                //DBG uint32_t actualLenghtToDeallocate = *reinterpret_cast<uint32_t*>(&buf_[beg % availCapacity_]);
-                //DBG if (actualLenghtToDeallocate != requestedLength)
-                //DBG {
-                //DBG     uint32_t pos = 0;
-                //DBG     std::cerr << "Blocks left to deallocate: " << std::endl;
-                //DBG     while (pos != end)
-                //DBG     {
-                //DBG         uint32_t len = *reinterpret_cast<uint32_t*>(&buf_[pos]);
-                //DBG         std::cerr << '[' << pos+4 << ".." << pos+len+4 << ']' << std::endl;
-                //DBG         pos += len + 4;
-                //DBG     }
-                //DBG     std::cerr << "Blocks left to deallocate: " << std::endl;
-                //DBG }
                 uint32_t begNew = (beg + length) % availCapacity_;
                 if (length <= availCapacity_ - (beg - end)) TRY_MOVE_BEGIN(beg, begNew);
             }

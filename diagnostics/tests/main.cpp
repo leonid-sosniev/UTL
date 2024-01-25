@@ -139,6 +139,15 @@ namespace {
     };
 }
 */
+
+class DummyEventFormatter
+    : public AbstractEventFormatter
+{
+private:
+    void formatEventAttributes_(MemoryResource & mem, const EventAttributes & attr) override {}
+    void formatEvent_(MemoryResource & mem, const EventAttributes & attr, const Arg args[]) override {}
+};
+
 class RawEventFormatter
     : public AbstractEventFormatter
 {
@@ -268,7 +277,8 @@ int main()
     static std::array<char,512> buf;
     std::fill(buf.begin(), buf.end(), '\xDB');
 
-    RawEventFormatter fmt{};
+    //RawEventFormatter fmt{};
+    DummyEventFormatter fmt{};
     FlatBufferWriter wtr{ buf.data(), buf.size() };
 /*
     {
@@ -303,7 +313,7 @@ int main()
 */
     _utl::DummyWriter dwtr;
 
-    Logger l{fmt, dwtr, 1024*5, 1024, 65536, 1024};//, "L"};
+    Logger l{fmt, dwtr, 8'000, 8'000, 2, 2};//, "L"};
 
     auto t_0 = std::chrono::steady_clock::now();
     size_t N = 1'000'000;
@@ -314,8 +324,7 @@ int main()
     auto t_1 = std::chrono::steady_clock::now();
     auto dur = std::chrono::duration_cast<std::chrono::nanoseconds>(t_1 - t_0);
 
-    std::cout << "All events take " << dur.count() << "ns" << std::endl;
-    std::cout << "1 event takes " << (dur / N).count() << "ns" << std::endl;
+    std::cout << "All events take " << dur.count() << "ns; 1 event takes " << (dur / N).count() << "ns" << std::endl;
 
     return 0;
     // // wrapping up the buffer end

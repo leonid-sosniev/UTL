@@ -28,12 +28,12 @@
 
 namespace {
 
-    template<typename T>
-    using ManyReadersManyWritersAllocator = _utl::SimpleAllocator<sizeof(T)>;
+    //template<typename T>
+    //using ManyReadersManyWritersAllocator = _utl::SimpleAllocator<sizeof(T)>;
     template<typename T>
     using SingleReaderSingleWriterAllocator = _utl::ThreadSafeCircularAllocator<sizeof(T)>;
-    template<typename T>
-    using ManyReadersManyWritersQueue = _utl::ThreadSafeCircularQueue<T, _utl::ThreadSafeQueueStrategy_ManyReadersManyWriters>;
+    //template<typename T>
+    //using ManyReadersManyWritersQueue = _utl::ThreadSafeCircularQueue<T, _utl::ThreadSafeQueueStrategy_ManyReadersManyWriters>;
     template<typename T>
     using SingleReaderSingleWriterQueue = _utl::ThreadSafeCircularQueue<T, _utl::ThreadSafeQueueStrategy_LocklessSingleReaderSingleWriter>;
 
@@ -275,13 +275,17 @@ namespace {
     }
     template<class...Ts> inline void logEvent(Logger & logger, const EventAttributes & attributes, Ts &&... argsPack)
     {
-        Arg * args = logger.allocateArgsBuffer(attributes);
-        _utl::logging::internal::fillArgsBuffer(args, std::forward<Ts&&>(argsPack)...);
+        Arg * args = nullptr;
+        if (attributes.argumentsExpected)
+        {
+            args = logger.allocateArgsBuffer(attributes);
+            _utl::logging::internal::fillArgsBuffer(args, std::forward<Ts&&>(argsPack)...);
+        }
         logger.logEvent(attributes, args);
     }
 }
     #define UTL_logev(CHANNEL, MESSAGE, ...) { \
-        static _utl::logging::EventAttributes cpd{ \
+        static const _utl::logging::EventAttributes cpd{ \
             _utl::logging::Str::create(MESSAGE), \
             _utl::logging::Str::create(__FUNCTION__), \
             _utl::logging::Str::create(_utl::logging::getCharAfterLastSlash(__FILE__)), \
@@ -289,7 +293,7 @@ namespace {
             __LINE__, \
             _utl::logging::count_of(__VA_ARGS__) \
         }; \
-        static auto purposed_to_call_registerEvent_once = _utl::logging::registerEvent(CHANNEL,cpd); \
+        static const auto purposed_to_call_registerEvent_once = _utl::logging::registerEvent(CHANNEL,cpd); \
         _utl::logging::logEvent(CHANNEL,cpd,##__VA_ARGS__); \
     }
 
