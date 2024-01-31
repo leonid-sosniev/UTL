@@ -273,14 +273,16 @@ namespace {
         logger.registerEventAttributes(attr);
         return attr.id;
     }
+    inline void logEvent(Logger & logger, const EventAttributes & attributes)
+    {
+        assert(attributes.argumentsExpected == 0);
+        logger.logEvent(attributes, nullptr);
+    }
     template<class...Ts> inline void logEvent(Logger & logger, const EventAttributes & attributes, Ts &&... argsPack)
     {
-        Arg * args = nullptr;
-        if (attributes.argumentsExpected)
-        {
-            args = logger.allocateArgsBuffer(attributes);
-            _utl::logging::internal::fillArgsBuffer(args, std::forward<Ts&&>(argsPack)...);
-        }
+        assert(attributes.argumentsExpected);
+        Arg * args = logger.allocateArgsBuffer(attributes);
+        _utl::logging::internal::fillArgsBuffer(args, std::forward<Ts&&>(argsPack)...);
         logger.logEvent(attributes, args);
     }
 }
