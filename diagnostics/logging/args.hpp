@@ -167,7 +167,7 @@ namespace {
         fillArgsBuffer_sfinae(argBuf++, std::forward<T&&>(fst));
         fillArgsBuffer_sfinae(argBuf, std::forward<Ts&&>(args)...);
     }
-    inline void fillArgsBuffer_sfinae(Arg * argBuf) { argBuf->type = Arg::TypeID::TI_NONE; }
+    inline void fillArgsBuffer_sfinae(Arg * argBuf) {}
 
 } // anonimous namespace
 
