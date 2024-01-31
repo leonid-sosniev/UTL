@@ -286,6 +286,7 @@ namespace {
         logger.logEvent(attributes, args);
     }
 }
+    #define UTL_LOG_EVENT_ID cpd.id
     #define UTL_logev(CHANNEL, MESSAGE, ...) { \
         static const _utl::logging::EventAttributes cpd{ \
             _utl::logging::Str::create(MESSAGE), \
