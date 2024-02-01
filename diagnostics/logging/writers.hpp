@@ -44,8 +44,11 @@ public:
     bool flush() final override {
         return true;
     }
-    const void * position() const {
-        return m_cursor;
+    size_t size() const {
+        return m_cursor - m_block;
+    }
+    size_t capacity() const {
+        return m_blockEnd - m_block;
     }
 };
 
