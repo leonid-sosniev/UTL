@@ -66,6 +66,10 @@ namespace _utl {
 #endif
         {
         }
+        bool isEmpty() const
+        {
+            return begin_ == end_;
+        }
         bool tryEnqueue(const TItem & item)
         {
             // places the given item onto items_[start_], moves end_ forward
