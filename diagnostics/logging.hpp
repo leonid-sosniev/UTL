@@ -142,17 +142,11 @@ namespace _utl { namespace logging {
         MemoryResource mem_;
         AbstractEventFormatter * fmt_;
         AbstractWriter * wtr_;
-        volatile std::atomic<int8_t> isActive_;
+        volatile std::atomic<int8_t> isStopRequested_;
         std::thread threadF_;
         std::thread threadW_;
         //const std::string debugName_;
     private:
-        void deactivate() {
-            isActive_.store(-1);
-        }
-        bool isActive() {
-            return isActive_.load() > 0;
-        }
         void formatterLoop()
         {
             DBG_FUNC("fmt loop")
@@ -177,7 +171,7 @@ namespace _utl { namespace logging {
                     std::this_thread::sleep_for(std::chrono::milliseconds{1});
                 }
             }
-            while (isActive());
+            while (!isStopRequested_);
         }
         void writerLoop()
         {
@@ -193,7 +187,7 @@ namespace _utl { namespace logging {
                         mem_.formattedDataAllocator_.release(blk.capacity);
                     }
                 }
-                else if (isActive())
+                else if (!isStopRequested_)
                 {
                     wtr_->flush();
                 }
@@ -214,16 +208,16 @@ namespace _utl { namespace logging {
             , eventQueue_(eventsBufferLength)//, "log")
             , argAllocator_(argsBufferLength)//, "arg alloc")
             , mem_(formattingBufferSize, writtingQueueLength)
+            , isStopRequested_{false}
             , threadF_(&Logger::formatterLoop, this)
             , threadW_(&Logger::writerLoop, this)
-            , isActive_(1)
             //, debugName_(std::move(debugName))
         {
         }
         ~Logger()
         {
             //std::cerr << "Logger.dtor " << debugName_ << std::endl;
-            deactivate();
+            isStopRequested_.store(true);
             if (threadW_.joinable())
             {
                 threadW_.join();
