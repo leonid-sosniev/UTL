@@ -14,10 +14,14 @@ class Tester
     friend class TesterRegister;
     static std::map<std::string,std::function<void()>> tests_;
 public:
-    static void run()
+    static void run(const std::string & name = "")
     {
         for (auto & name_func : tests_)
         {
+            if (name.size() && name_func.first.find(name,0u) == std::string::npos)
+            {
+                continue;
+            }
             assert(name_func.second);
             std::cerr << "Running " << name_func.first << std::endl;
             try {
@@ -64,8 +68,11 @@ struct TesterRegister
 
 #if defined(CATCH_CONFIG_MAIN)
 
-int main()
+int main(int argc, char ** argv)
 {
+    if (argc > 1)
+        _utl::Tester::run(argv[1]);
+    else
     _utl::Tester::run();
 }
 
