@@ -1,4 +1,4 @@
-//#define CATCH_CONFIG_MAIN
+#define CATCH_CONFIG_MAIN
 //#define CATCH_CONFIG_ENABLE_BENCHMARKING
 //#include <utl/Catch2/single_include/catch2/catch.hpp>
 #include <utl/tester.hpp>
@@ -30,8 +30,6 @@
 using namespace _utl::logging;
 using namespace _utl;
 namespace ch = std::chrono;
-
-const char * strArr[2] = { "4", "some text" };
 
 /*
 namespace {
@@ -176,15 +174,28 @@ void RawEventFormatter::formatEventAttributes_(MemoryResource & mem, const Event
 EventAttributes parseEventAttributes(const char * buff, const char ** out_cursor)
 {
     auto start = buff;
-    EventAttributes attr;
-    assert(std::memcmp(buff, "!!!!", 4) == 0);                                                          buff += 4;
-    std::memcpy(&attr.id, buff, sizeof(attr.id) + sizeof(attr.line) + sizeof(attr.argumentsExpected));  buff += sizeof(attr.id) + sizeof(attr.line) + sizeof(attr.argumentsExpected);
+    EventAttributes attr{};
+    if (buff[0] != '!')
+        throw std::logic_error{"The EventAttributes signature not found when expected"};
+    if (buff[1] != '!')
+        throw std::logic_error{"The EventAttributes signature not found when expected"};
+    if (buff[2] != '!')
+        throw std::logic_error{"The EventAttributes signature not found when expected"};
+    if (buff[3] != '!')
+        throw std::logic_error{"The EventAttributes signature not found when expected"};
+    buff += 4;
+    std::memcpy(&attr.id, buff, sizeof(attr.id) + sizeof(attr.line) + sizeof(attr.argumentsExpected));
+    buff += sizeof(attr.id) + sizeof(attr.line) + sizeof(attr.argumentsExpected);
 
-    uint64_t len[3]; std::memcpy(&len[0], buff, sizeof(uint64_t) * 3);                                  buff += sizeof(uint64_t) * 3;
+    uint64_t len[3]; std::memcpy(&len[0], buff, sizeof(uint64_t) * 3);
+    buff += sizeof(uint64_t) * 3;
 
-    char *ptr0 = new char[len[0] + 1];  std::memcpy(ptr0, buff, len[0]);                                buff += len[0];
-    char *ptr1 = new char[len[1] + 1];  std::memcpy(ptr1, buff, len[1]);                                buff += len[1];
-    char *ptr2 = new char[len[2] + 1];  std::memcpy(ptr2, buff, len[2]);                                buff += len[2];
+    char *ptr0 = new char[len[0] + 1];  std::memcpy(ptr0, buff, len[0]);
+    buff += len[0];
+    char *ptr1 = new char[len[1] + 1];  std::memcpy(ptr1, buff, len[1]);
+    buff += len[1];
+    char *ptr2 = new char[len[2] + 1];  std::memcpy(ptr2, buff, len[2]);
+    buff += len[2];
     attr.messageFormat = Str{ ptr0, ptr0+len[0] };  ptr0[len[0]] = '\0';    
     attr.function      = Str{ ptr1, ptr1+len[1] };  ptr1[len[1]] = '\0';    
     attr.file          = Str{ ptr2, ptr2+len[2] };  ptr2[len[2]] = '\0';    
@@ -269,34 +280,42 @@ void printDump(const char * data, size_t size)
     std::cerr << std::endl;
 }
 
+const char * strArr[2] = { "4", "some text" };
 
-
-//TEST_CASE("smoke sequential", "[interthread][event][channel][validation]")
-int main()
+TEST_CASE("1 smoke sequential", "[event][validation]")
 {
     static std::array<char,512> buf;
     std::fill(buf.begin(), buf.end(), '\xDB');
 
-    //RawEventFormatter fmt{};
-    DummyEventFormatter fmt{};
+    RawEventFormatter fmt{};
     FlatBufferWriter wtr{ buf.data(), buf.size() };
-/*
-    {
-    Logger chan(fmt, wtr, 64, 300, 1024, 300, "Logger");
+    Logger chan(fmt, wtr, 64, 300, 1024, 300);
 
     // all data fits in the buffer
+    uint32_t anchor__LINE__;
     for (int i = 0; i < 2; ++i)
     {
-        UTL_logev(chan, "1234567890-", 1u, -1-i, 0.2, '3', strArr[i]);
-        std::this_thread::sleep_for(std::chrono::milliseconds{30});
-        printDump(buf.data(), buf.size());
-        std::this_thread::sleep_for(std::chrono::milliseconds{30});
+        UTL_logev(chan, "1234567890-", 1u, -1-i, 0.2, '3', strArr[i]); anchor__LINE__ = __LINE__;
     }
-    
+    while (wtr.size() < 10)
+    {
+        std::this_thread::yield();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds{200});
+    auto sz = wtr.size();
+
     const char * cursor = buf.data();
     auto attr = parseEventAttributes(cursor, &cursor);
     auto args1 = parseEvent(cursor, &cursor);
     auto args2 = parseEvent(cursor, &cursor);
+
+    const auto ID = _utl::logging::EventAttributes::getNewEventID();
+    REQUIRE(attr.argumentsExpected              == 5);
+    REQUIRE(attr.id                             == ID-1);
+    REQUIRE(attr.line                           == anchor__LINE__);
+    REQUIRE(std::strstr(__FILE__     , attr.file.str         ));
+    REQUIRE(std::strstr(__FUNCTION__ , attr.function.str     ));
+    REQUIRE(std::strstr("1234567890-", attr.messageFormat.str));
 
     assert(args1[0].type == Arg::TypeID::TI_u32);            assert(args1[0].valueOrArray.u32                         ==   1);
     assert(args1[1].type == Arg::TypeID::TI_i32);            assert(args1[1].valueOrArray.i32                         ==  -1);
@@ -309,29 +328,78 @@ int main()
     assert(args2[2].type == Arg::TypeID::TI_f64);            assert(args2[2].valueOrArray.f64                         == 0.2);
     assert(args2[3].type == Arg::TypeID::TI_Char);           assert(args2[3].valueOrArray.Char                        == '3');
     assert(args2[4].type == Arg::TypeID::TI_arrayof_Char);   assert(args2[4].valueOrArray.debugPtr == std::string(strArr[1]));
-    }
-*/
-    _utl::DummyWriter dwtr;
+}
 
-    Logger l{fmt, dwtr, 8'000, 8'000, 2, 2};//, "L"};
+TEST_CASE("2 The dummies", "[benchmark]")
+{
+    DummyEventFormatter fmt{};
+    _utl::DummyWriter dwtr{};
+    Logger l{fmt, dwtr, 512'000, 512'000, 2, 2};
 
-    auto t_0 = std::chrono::steady_clock::now();
     size_t N = 1'000'000;
+    std::vector<std::chrono::steady_clock::time_point> t;
+    t.reserve(8);
+
+    t.emplace_back(std::chrono::steady_clock::now());
     for (size_t i = 0; i < N; ++i)
     {
         UTL_logev(l, "1234567890-", 1u, -1-i, 0.2, '3', strArr[i%2]);
     }
-    auto t_1 = std::chrono::steady_clock::now();
-    auto dur = std::chrono::duration_cast<std::chrono::nanoseconds>(t_1 - t_0);
+    t.emplace_back(std::chrono::steady_clock::now());
+    for (size_t i = 0; i < N; ++i)
+    {
+        UTL_logev(l, "1234567890-");
+    }
+    t.emplace_back(std::chrono::steady_clock::now());
+    for (size_t i = 0; i < N; ++i)
+    {
+        UTL_logev(l,
+            "mid={}, file={}, line={}, func={}, log={}, lvl={}, time={}, tid={}, cpu={}",
+            UTL_LOG_EVENT_ID, __FILE__, __LINE__, __FUNCTION__,  "DBG", std::chrono::steady_clock::now(), std::this_thread::get_id(), i
+        );
+    }
+    t.emplace_back(std::chrono::steady_clock::now());
+    
+    for (size_t i = 1; i < t.size(); ++i)
+    {
+        auto dur = std::chrono::duration_cast<std::chrono::nanoseconds>(t[i] - t[i-1]);
+        std::cout << "All events [" << i << "] take " << dur.count() << "ns; 1 event takes " << (dur / N).count() << "ns" << std::endl;
+    }
+}
 
-    std::cout << "All events take " << dur.count() << "ns; 1 event takes " << (dur / N).count() << "ns" << std::endl;
+TEST_CASE("3 Usual use", "[benchmark]")
+{
+    static std::array<char,512> buf;
+    std::fill(buf.begin(), buf.end(), '\xDB');
 
-    return 0;
-    // // wrapping up the buffer end
-    // auto p_2 = (char*) wtr.position();
-    // for (int i = 0; i < 2; ++i) { UTL_logev(chan, "1234567890-", 1u, -1, 0.2, '3', strArr[i]); }
-    // for (int i = 0; i < 2; ++i) { while (!chan.tryReceiveAndProcessEvent()) {} }
-    // VALIDATE_INTERTHREAD_OUTPUT(p_2);
+    RawEventFormatter fmt{};
+    FlatBufferWriter wtr{ buf.data(), buf.size() };
+    _utl::DummyWriter dwtr{};
+
+    Logger chanD(fmt, dwtr, 512'000, 512'000, 1024'000, 512'000);
+    Logger chan(fmt, wtr, 512'000, 512'000, 1024'000, 512'000);
+
+    std::vector<std::chrono::steady_clock::time_point> t;
+    t.reserve(8);
+    size_t N = 1'000'000;
+
+    t.emplace_back(std::chrono::steady_clock::now());
+    for (int i = 0; i < 1'000'000; ++i)
+    {
+        UTL_logev(chanD, "1234567890-", 1u, -1-i, 0.2, '3', strArr[i%2]);
+    }
+    t.emplace_back(std::chrono::steady_clock::now());
+    for (int i = 0; i < 1'000'000; ++i)
+    {
+        UTL_logev(chan, "1234567890-", 1u, -1-i, 0.2, '3', strArr[i%2]);
+    }
+    t.emplace_back(std::chrono::steady_clock::now());
+
+    for (size_t i = 1; i < t.size(); ++i)
+    {
+        auto dur = std::chrono::duration_cast<std::chrono::nanoseconds>(t[i] - t[i-1]);
+        std::cout << "All events [" << i << "] take " << dur.count() << "ns; 1 event takes " << (dur / N).count() << "ns" << std::endl;
+    }
 }
 
 /*
