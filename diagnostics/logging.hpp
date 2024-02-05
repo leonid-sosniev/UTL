@@ -77,14 +77,14 @@ namespace _utl { namespace logging {
             uint16_t size;
             uint16_t capacity;
         };
-        SingleReaderSingleWriterQueue<Block> writerDataQueue_;
-        SingleReaderSingleWriterAllocator<char> formattedDataAllocator_;
+        SingleReaderSingleWriterQueue<Block> & writerDataQueue_;
+        SingleReaderSingleWriterAllocator<char> & formattedDataAllocator_;
         char * lastAllocatedPtr_;
         uint16_t lastAllocatedSize_;
     public:
-        MemoryResource(uint32_t formattingBufferSize, uint32_t writtingQueueLength)
-            : formattedDataAllocator_(formattingBufferSize)
-            , writerDataQueue_(writtingQueueLength, "mem-res")
+        MemoryResource(SingleReaderSingleWriterQueue<Block> & writerDataQueue, SingleReaderSingleWriterAllocator<char> & formattedDataAllocator)
+            : formattedDataAllocator_(formattedDataAllocator)
+            , writerDataQueue_(writerDataQueue)
             , lastAllocatedPtr_(nullptr)
             , lastAllocatedSize_(0)
         {
@@ -139,6 +139,8 @@ namespace _utl { namespace logging {
         };
         SingleReaderSingleWriterQueue<Ev> eventQueue_;
         SingleReaderSingleWriterAllocator<Arg> argAllocator_;
+        SingleReaderSingleWriterAllocator<char> formattedDataAllocator_;
+        SingleReaderSingleWriterQueue<MemoryResource::Block> writerDataQueue_;
         MemoryResource mem_;
         AbstractEventFormatter * fmt_;
         AbstractWriter * wtr_;
@@ -207,7 +209,9 @@ namespace _utl { namespace logging {
             , wtr_(&wtr)
             , eventQueue_(eventsBufferLength)//, "log")
             , argAllocator_(argsBufferLength)//, "arg alloc")
-            , mem_(formattingBufferSize, writtingQueueLength)
+            , formattedDataAllocator_(formattingBufferSize)
+            , writerDataQueue_(writtingQueueLength)
+            , mem_(writerDataQueue_, formattedDataAllocator_)
             , isStopRequested_{false}
             , threadF_(&Logger::formatterLoop, this)
             , threadW_(&Logger::writerLoop, this)
