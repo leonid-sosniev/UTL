@@ -3,116 +3,75 @@
 #include <cstdint>
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <set>
-
-class ThreadNames
-{
-    mutable std::mutex mux_;
-    std::map<std::thread::id,std::string> names_;
-public:
-    void setName(const std::string & name, size_t index = size_t(-1))
-    {
-        std::unique_lock<std::mutex> lock{mux_};
-        std::string &saved = names_[std::this_thread::get_id()];
-        if (size_t(-1) == index) {
-            saved = name;
-        } else {
-            saved.resize(name.size() + (index < uint16_t(-1) ? 5 : 20));
-            auto len = std::snprintf(const_cast<char*>(saved.data()), saved.size(), "%s_%zu", name.c_str(), index);
-            assert(len > 0);
-            saved.resize(len);
-        }
-        pthread_setname_np(pthread_self(), saved.c_str());
-    }
-    std::string getName(std::thread::id threadId)
-    {
-        std::unique_lock<std::mutex> lock{mux_};
-        auto it = names_.find(threadId);
-        return (names_.end() != it) ? it->second : (std::stringstream{} << threadId).str();
-    }
-    std::string getName()
-    {
-        return getName(std::this_thread::get_id());
-    }
-    std::map<std::thread::id,std::string> names() const
-    {
-        std::unique_lock<std::mutex> lock{mux_};
-        return names_;
-    }
-};
-template<typename T> class Singleton
-{
-public:
-    static T & getInstance()
-    {
-        static T instance{};
-        return instance;
-    }
-};
-Singleton<ThreadNames> g_threadNames;
-
-#if defined(NDEBUG)
- #define DBG_FUNC_N(NAME_STR, INDEX)
- #define DBG_FUNC(NAME_STR)
- #define DBG_FUNC_GET_NAME() ""
-#else
- #define DBG_FUNC_N(NAME_STR, INDEX) g_threadNames.getInstance().setName(NAME_STR, INDEX);
- #define DBG_FUNC(NAME_STR) g_threadNames.getInstance().setName(NAME_STR);
- #define DBG_FUNC_GET_NAME() g_threadNames.getInstance().getName()
-#endif
+#include <utl/diagnostics/logging/internal/DebuggingMacros.hpp>
 
 namespace _utl {
 
-    template<size_t SizeofItem> class ThreadSafeCircularAllocator {
+    template<
+        typename TItem,
+        typename = typename std::enable_if<std::is_pod<TItem>::value>::type
+    >
+    class ThreadSafeCircularAllocator {
     private:
-        using TItem = char[SizeofItem];
-        std::unique_ptr<TItem[]> buf_;
+        std::unique_ptr<TItem[],void(*)(TItem*)> buf_;
         uint32_t const capacity_;
-        std::atomic_uint32_t availCapacity_, begin_, end_;
-        std::atomic_flag isAllocating_;
-        std::atomic_flag isDeallocating_;
+        volatile std::atomic_uint32_t availCapacity_, begin_, end_;
+        volatile std::atomic_flag isAllocating_;
+        volatile std::atomic_flag isDeallocating_;
+        static std::unique_ptr<TItem[],void(*)(TItem*)> makeUnique(uint32_t length)
+        {
+            void(*deleter)(TItem*) = length ? [](TItem* p) { delete[] p; } : [](TItem*) {};
+            TItem * buffer = length ? new TItem[length] : nullptr;
+            return {buffer, deleter};
+        }
     public:
         std::function<void()> onOverflowEvent;
-        ThreadSafeCircularAllocator(uint32_t capacity)
-            : buf_(new TItem[capacity])
-            , capacity_(capacity)
-            , availCapacity_(capacity)
-            , end_(0)
+#if defined(DEBUG)
+        std::string debugName;
+#endif
+        inline bool containsPointer(const void * pointer)
+        {
+            auto ptr = static_cast<const TItem*>(pointer);
+            auto base = buf_.get();
+            auto end = buf_.get() + capacity_;
+            bool yes = base <= ptr && ptr < end;
+            return yes;
+        }
+
+        ThreadSafeCircularAllocator(TItem * buffer, uint32_t length, void(*bufferDeleter)(TItem*))
+            : buf_(buffer, bufferDeleter)
+            , capacity_(length)
+            , availCapacity_(length)
             , begin_(0)
+            , end_(0)
             , isAllocating_(false)
             , isDeallocating_(false)
+            , debugAllocatedSize_(0)
         {
             //DBG std::memset(&buf_[0], 't', capacity);
         }
-        
-        /**
-         * @brief Constructs a new Lockless Circular Allocator object
-         * @pre The object is safe to move only right after its construction (before any method is called)
-         * @param rhs Another object to move the data from
-         */
-        ThreadSafeCircularAllocator(ThreadSafeCircularAllocator && rhs)
-            : buf_(std::move(rhs.buf_))
-            , capacity_(rhs.capacity_)
-            , availCapacity_(rhs.availCapacity_)
-            , end_(rhs.end_)
-            , begin_(rhs.begin_)
-            , isAllocating_(true)
-            , isDeallocating_(true)
+        ThreadSafeCircularAllocator(uint32_t capacity = 0)
+            : buf_(makeUnique(capacity))
+            , capacity_(capacity)
+            , availCapacity_(capacity)
+            , begin_(0)
+            , end_(0)
+            , isAllocating_(false)
+            , isDeallocating_(false)
+            , debugAllocatedSize_(0)
         {
-            while (rhs.isDeallocating_.test_and_set()) {}
-            while (rhs.isAllocating_.test_and_set()) {}
-            capacity_ = 0;
-            availCapacity_.store(0);
-            end_.store(0);
-            begin_.store(0);
-            rhs.isAllocating_.clear();
-            rhs.isDeallocating_.clear();
+            //DBG std::memset(&buf_[0], 't', capacity);
         }
+
+        ThreadSafeCircularAllocator(ThreadSafeCircularAllocator &&) = delete;
         ThreadSafeCircularAllocator(const ThreadSafeCircularAllocator &) = delete;
 
         ThreadSafeCircularAllocator & operator=(ThreadSafeCircularAllocator &&) = delete;
         ThreadSafeCircularAllocator & operator=(const ThreadSafeCircularAllocator &) = delete;
 
+        std::atomic_size_t debugAllocatedSize_;
         inline bool isEmpty() const
         {
             return begin_ == end_;
@@ -125,12 +84,14 @@ namespace _utl {
                 result = tryAllocate(length);
             }
             while (!result);
+            debugAllocatedSize_ += length;
             return result;
         }
         void release(uint32_t length)
         {
             while (!tryDeallocate(length))
             {}
+            debugAllocatedSize_ -= length;
         }
         #define TRY_MOVE_END(OLD_VAL, NEW_VAL, RESULT_INDEX) \
         { \
@@ -218,27 +179,35 @@ namespace _utl {
         const uint32_t capacity_;
         struct Blk { TItem * ptr; intmax_t size; };
         std::list<Blk> segments_;
-        std::mutex mutex_;
+        mutable std::mutex mutex_;
     public:
+#if defined(DEBUG)
         std::set<std::thread::id> acquirers_;
         std::set<std::thread::id> releasers_;
-        std::string debugName_;
+        std::string debugName;
+#endif
     public:
+        uint32_t debugLength() const
+        {
+            std::unique_lock<std::mutex> lock{mutex_};
+            return length_;
+        }
         ~SimpleAllocator()
         {
-            std::cerr << "SimpleAllocator '" << debugName_ << "' was acquired by";
-            for (std::thread::id id : acquirers_) std::cerr << " {" << g_threadNames.getInstance().getName(id) << "}";
+#if defined(DEBUG)
+            std::cerr << "SimpleAllocator '" << debugName << "' was acquired by";
+            for (std::thread::id id : acquirers_) std::cerr << " {" << DBG_THREAD_GET_NAME_BY_TID(id) << "}";
             std::cerr << " and released by";
-            for (std::thread::id id : releasers_) std::cerr << " {" << g_threadNames.getInstance().getName(id) << "}";
+            for (std::thread::id id : releasers_) std::cerr << " {" << DBG_THREAD_GET_NAME_BY_TID(id) << "}";
             std::cerr << std::endl;
+#endif
         }
         SimpleAllocator(
             uint32_t length
-            , std::string debugName = ""
+            , std::string debugName
         )
             : capacity_(length)
             , length_(0)
-            , debugName_(std::move(debugName))
         {}
         SimpleAllocator(SimpleAllocator &&) = delete;
         SimpleAllocator(const SimpleAllocator &) = delete;
@@ -255,7 +224,9 @@ namespace _utl {
             while (true)
             {
                 std::unique_lock<std::mutex> lock{mutex_};
+#if defined(DEBUG)
                 acquirers_.insert(std::this_thread::get_id());
+#endif
                 if (length_ < capacity_ - length)
                 {
                     auto p = new TItem[length];
@@ -269,20 +240,23 @@ namespace _utl {
                 }
             }
         }
-        inline void release(uint32_t length)
+        inline void release(uint32_t length, bool exact = true)
         {
             while (length)
             {
                 std::unique_lock<std::mutex> lock{mutex_};
+#if defined(DEBUG)
                 releasers_.insert(std::this_thread::get_id());
-                if (segments_.size())
+#endif
+                assert(segments_.size());
                 {
-                    Blk & seg = segments_.front();
-                    assert(seg.size == length);
-
-                    length_ -= seg.size;
-                    length = 0;
-                    delete[] seg.ptr;
+                    if (exact && segments_.front().size != length)
+                    {
+                        throw std::logic_error{"Wrong segment size"};
+                    }
+                    length_ -= segments_.front().size;
+                    length -= segments_.front().size;
+                    delete[] segments_.front().ptr;
                     segments_.pop_front();
                 }
             }
@@ -290,3 +264,45 @@ namespace _utl {
     };
 
 } // _utl namespace
+
+#include <utl/tester.hpp>
+
+TEST_CASE("ThreadSafeCircularAllocator 2 threads", "[validation][multithread]")
+{
+    struct Item {
+        uintptr_t p;
+        uintptr_t v;
+    };
+    _utl::ThreadSafeCircularAllocator<Item> alloc{65536};
+    std::thread t1{
+        [](_utl::ThreadSafeCircularAllocator<Item> * alloc) {
+            for (size_t i = 0; i < 1'000'000; ++i) {
+                size_t n = i % 2 ? 5 : 31;
+                bool deallocated = false;
+                auto t = std::chrono::steady_clock::now();
+                do {
+                    deallocated = alloc->tryDeallocate(n);
+                }
+                while (!deallocated && (std::chrono::steady_clock::now() - t < std::chrono::seconds{1}));
+                REQUIRE(deallocated);
+            }
+            REQUIRE(alloc->isEmpty());
+        }, &alloc
+    };
+    std::thread t2{
+        [](_utl::ThreadSafeCircularAllocator<Item> * alloc) {
+            for (size_t i = 0; i < 1'000'000; ++i) {
+                size_t n = i % 2 ? 5 : 31;
+                void * ptr = nullptr;
+                auto t = std::chrono::steady_clock::now();
+                do {
+                    ptr = alloc->tryAllocate(n);
+                }
+                while (!ptr && (std::chrono::steady_clock::now() - t < std::chrono::seconds{1}));
+                REQUIRE(ptr);
+            }
+        }, &alloc
+    };
+    t1.join();
+    t2.join();
+}

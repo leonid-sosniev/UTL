@@ -1,11 +1,8 @@
 #define CATCH_CONFIG_MAIN
-//#define CATCH_CONFIG_ENABLE_BENCHMARKING
-//#include <utl/Catch2/single_include/catch2/catch.hpp>
 #include <utl/tester.hpp>
 
-#include <cassert>
-
 #include <array>
+#include <cassert>
 #include <chrono>
 #include <condition_variable>
 #include <functional>
@@ -24,6 +21,8 @@
 //#include <utl/diagnostics/logging/formatters/PlainTextFormatters.hpp>
 //#include <utl/diagnostics/logging/channels/InterThreadChannels.hpp>
 //#include <utl/diagnostics/logging/channels/WebChannels.hpp>
+
+#include <utl/diagnostics/logging/internal/DebuggingMacros.hpp>
 
 #include <inttypes.h>
 
@@ -142,17 +141,26 @@ class DummyEventFormatter
     : public AbstractEventFormatter
 {
 private:
-    void formatEventAttributes_(MemoryResource & mem, const EventAttributes & attr) override {}
-    void formatEvent_(MemoryResource & mem, const EventAttributes & attr, const Arg args[]) override {}
+    void formatEventAttributes_(MemoryResource &, const EventAttributes &) override {}
+    void formatEvent_(MemoryResource &, const EventAttributes &, const Arg[]) override {}
 };
 
 class RawEventFormatter
     : public AbstractEventFormatter
 {
 private:
-    void formatEventAttributes_(MemoryResource & mem, const EventAttributes & attr) override;
-    void formatEvent_(MemoryResource & mem, const EventAttributes & attr, const Arg args[]) override;
+    void formatEventAttributes_(MemoryResource &, const EventAttributes & attr) override;
+    void formatEvent_(MemoryResource &, const EventAttributes &, const Arg args[]) override;
 };
+
+void readTo(AbstractReader & reader, std::vector<uint8_t> & container, size_t size) {
+    container.resize(size);
+    auto p = container.data();
+    auto end = p + size;
+    while (p < end) {
+        p += reader.read(p, end - p);
+    }
+}
 
 void RawEventFormatter::formatEventAttributes_(MemoryResource & mem, const EventAttributes & attr)
 {
@@ -165,16 +173,18 @@ void RawEventFormatter::formatEventAttributes_(MemoryResource & mem, const Event
     auto len0 = lenBuf[0] = attr.messageFormat.end - attr.messageFormat.str;
     auto len1 = lenBuf[1] = attr.function.end      - attr.function.str     ;
     auto len2 = lenBuf[2] = attr.file.end          - attr.file.str         ;
-    mem.submitAllocated(sizeof(uint64_t) * 3);
+    mem.submitAllocated(lenBuf, sizeof(uint64_t) * 3);
 
     mem.submitStaticConstantData(attr.messageFormat.str , len0);
     mem.submitStaticConstantData(attr.function.str      , len1);
     mem.submitStaticConstantData(attr.file.str          , len2);
 }
-EventAttributes parseEventAttributes(const char * buff, const char ** out_cursor)
+EventAttributes parseEventAttributes(AbstractReader & reader)
 {
-    auto start = buff;
+    std::vector<uint8_t> buff;
+
     EventAttributes attr{};
+    readTo(reader, buff, 4);
     if (buff[0] != '!')
         throw std::logic_error{"The EventAttributes signature not found when expected"};
     if (buff[1] != '!')
@@ -183,26 +193,21 @@ EventAttributes parseEventAttributes(const char * buff, const char ** out_cursor
         throw std::logic_error{"The EventAttributes signature not found when expected"};
     if (buff[3] != '!')
         throw std::logic_error{"The EventAttributes signature not found when expected"};
-    buff += 4;
-    std::memcpy(&attr.id, buff, sizeof(attr.id) + sizeof(attr.line) + sizeof(attr.argumentsExpected));
-    buff += sizeof(attr.id) + sizeof(attr.line) + sizeof(attr.argumentsExpected);
 
-    uint64_t len[3]; std::memcpy(&len[0], buff, sizeof(uint64_t) * 3);
-    buff += sizeof(uint64_t) * 3;
+    readTo(reader, buff, sizeof(attr.id) + sizeof(attr.line) + sizeof(attr.argumentsExpected));
+    std::memcpy(&attr.id, buff.data(), sizeof(attr.id) + sizeof(attr.line) + sizeof(attr.argumentsExpected));
 
-    char *ptr0 = new char[len[0] + 1];  std::memcpy(ptr0, buff, len[0]);
-    buff += len[0];
-    char *ptr1 = new char[len[1] + 1];  std::memcpy(ptr1, buff, len[1]);
-    buff += len[1];
-    char *ptr2 = new char[len[2] + 1];  std::memcpy(ptr2, buff, len[2]);
-    buff += len[2];
+    readTo(reader, buff, sizeof(uint64_t) * 3);
+    uint64_t len[3]; std::memcpy(&len[0], buff.data(), sizeof(uint64_t) * 3);
+
+    readTo(reader, buff, len[0]); char *ptr0 = new char[len[0] + 1];  std::memcpy(ptr0, buff.data(), len[0]); 
+    readTo(reader, buff, len[1]); char *ptr1 = new char[len[1] + 1];  std::memcpy(ptr1, buff.data(), len[1]);
+    readTo(reader, buff, len[2]); char *ptr2 = new char[len[2] + 1];  std::memcpy(ptr2, buff.data(), len[2]);
+
     attr.messageFormat = Str{ ptr0, ptr0+len[0] };  ptr0[len[0]] = '\0';    
     attr.function      = Str{ ptr1, ptr1+len[1] };  ptr1[len[1]] = '\0';    
     attr.file          = Str{ ptr2, ptr2+len[2] };  ptr2[len[2]] = '\0';    
 
-    if (out_cursor) {
-        *out_cursor = buff;
-    }
     return attr;
 }
 
@@ -216,33 +221,44 @@ void RawEventFormatter::formatEvent_(MemoryResource & mem, const EventAttributes
     auto argsSize = sizeof(Arg) * attr.argumentsExpected;
     auto alloc = (Arg*) mem.allocate(argsSize);
     std::copy(args, argsEnd, alloc);
-    mem.submitAllocated(argsSize);
+    mem.submitAllocated(alloc, argsSize);
 
-    for (auto arg = args; arg < argsEnd; ++arg)
+    for (size_t i = 0; i < attr.argumentsExpected; ++i)
     {
-        if (int(arg->type) & (int) Arg::TypeID::__ISARRAY)
+        const Arg * arg = &args[i];
+        auto t = static_cast<unsigned>(arg->type);
+        auto tSize = Arg::typeSize(arg->type);
+        if (t & (unsigned) Arg::TypeID::__ISARRAY)
         {
-            auto sz = Arg::typeSize(arg->type) * arg->arrayLength;
+            auto sz = tSize * arg->arrayLength;
             auto buf = mem.allocate(sz);
             std::memcpy(buf, arg->valueOrArray.ArrayPointer, sz);
-            mem.submitAllocated(sz);
+            mem.submitAllocated(buf, sz);
         }
     }
 }
-std::unique_ptr<Arg[]> parseEvent(const char * buff, const char ** out_cursor)
+std::unique_ptr<Arg[]> parseEvent(AbstractReader & reader)
 {
-    auto start = buff;
+    std::vector<uint8_t> buff;
+
     size_t attr_argumentsExpected;
     EventID attr_id;
 
-    assert(std::memcmp(buff, "::::", 4) == 0);                                      buff += 4;
-    std::memcpy(&attr_id, buff, sizeof(attr_id));                                   buff += sizeof(attr_id);
-    std::memcpy(&attr_argumentsExpected, buff, sizeof(attr_argumentsExpected));     buff += sizeof(attr_argumentsExpected);
+    readTo(reader, buff, 4);
+    assert(std::memcmp(buff.data(), "::::", 4) == 0);
+
+    readTo(reader, buff, sizeof(attr_id));
+    std::memcpy(&attr_id, buff.data(), sizeof(attr_id));
+
+    readTo(reader, buff, sizeof(attr_argumentsExpected));
+    std::memcpy(&attr_argumentsExpected, buff.data(), sizeof(attr_argumentsExpected));
 
     auto result = std::make_unique<Arg[]>(attr_argumentsExpected);
     Arg *args = result.get();
     Arg *argsEnd = args + attr_argumentsExpected;
-    std::memcpy(args, buff, sizeof(Arg) * attr_argumentsExpected);                  buff += sizeof(Arg) * attr_argumentsExpected;
+
+    readTo(reader, buff, sizeof(Arg) * attr_argumentsExpected);
+    std::memcpy(args, buff.data(), sizeof(Arg) * attr_argumentsExpected);
 
     for (Arg *arg = args; arg < argsEnd; ++arg)
     {
@@ -250,14 +266,13 @@ std::unique_ptr<Arg[]> parseEvent(const char * buff, const char ** out_cursor)
         {
             auto sz = Arg::typeSize(arg->type) * arg->arrayLength;
             auto p = new char[sz];
-            std::memcpy(p, buff, sz);                                               buff += sz;
+
+            readTo(reader, buff, sz);
+            std::memcpy(p, buff.data(), sz);
             arg->valueOrArray.ArrayPointer = p;
         }
     }
-    if (out_cursor) {
-        *out_cursor = buff;
-    }
-    return std::move(result);
+    return result;
 }
 
 #define REQ(T,value) \
@@ -282,34 +297,69 @@ void printDump(const char * data, size_t size)
 
 const char * strArr[2] = { "4", "some text" };
 
-static const auto FMT_THREADS_NUMBER = std::min<uint16_t>(std::thread::hardware_concurrency(), 4);
+static const auto FMT_THREADS_NUMBER = std::min<uint16_t>(std::thread::hardware_concurrency(), 8);
+
+#include <iterator>
+#include <algorithm>
+#include <deque>
+
+class TestBuffer final : public _utl::AbstractWriter, public _utl::AbstractReader {
+private:
+    std::deque<uint8_t> space_;
+public:
+    TestBuffer()
+    {}
+    uint32_t write(const void * data, uint32_t size) final override {
+        auto it = static_cast<const uint8_t*>(data);
+        auto end = it + size;
+        std::copy(it, end , std::back_inserter<std::deque<uint8_t>>(space_));
+        return size;
+    }
+    bool flush() final override {
+        std::this_thread::yield();
+        return true;
+    }
+    /// @brief Can frequently read less than requested
+    /// @return Actual read data size
+    uint32_t read(void * data, uint32_t size) final override {
+        size = std::min<size_t>(space_.size(), size);
+        std::copy(space_.begin(), space_.begin() + size, static_cast<uint8_t*>(data));
+        space_.erase(space_.begin(), space_.begin() + size);
+        return size;
+    }
+    void printTo(std::ostream & stream) {
+        for (uint8_t b : space_)
+        {
+            if (std::isprint(b)) {
+                stream << b;
+            } else {
+                stream << '[' << (unsigned)b << ']';
+            }
+        }
+        stream << std::endl;
+    }
+};
 
 TEST_CASE("1 smoke sequential", "[event][validation]")
 {
-    static std::array<char,512> buf;
-    std::fill(buf.begin(), buf.end(), '\xDB');
-
     RawEventFormatter fmt{};
-    FlatBufferWriter wtr{ buf.data(), buf.size() };
-    Logger chan(1, fmt, wtr, 64, 300, 1024, 300, "Smoke");
-
-    // all data fits in the buffer
+    TestBuffer wtr;
+    Logger chan(2, fmt, wtr, 64, 300, 1024, 300);
     uint32_t anchor__LINE__;
+
+    {
+    // all data fits in the buffer
     for (int i = 0; i < 2; ++i)
     {
-        UTL_logev(chan, "1234567890-", 1u, -1-i, 0.2, '3', strArr[i]); anchor__LINE__ = __LINE__;
+        UTL_logev(chan, "1234567890-", 1u, -1-i, 0.2, '3', strArr[i % 2]); anchor__LINE__ = __LINE__;
     }
-    while (wtr.size() < 10)
-    {
-        std::this_thread::yield();
+    while (!chan.isIdle()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds{200});
-    auto sz = wtr.size();
 
-    const char * cursor = buf.data();
-    auto attr = parseEventAttributes(cursor, &cursor);
-    auto args1 = parseEvent(cursor, &cursor);
-    auto args2 = parseEvent(cursor, &cursor);
+    _utl::logging::EventAttributes attr = parseEventAttributes(wtr);
+    auto args1 = parseEvent(wtr);
+    auto args2 = parseEvent(wtr);
 
     const auto ID = _utl::logging::EventAttributes::getNewEventID();
     REQUIRE(attr.argumentsExpected              == 5);
@@ -330,13 +380,42 @@ TEST_CASE("1 smoke sequential", "[event][validation]")
     assert(args2[2].type == Arg::TypeID::TI_f64);            assert(args2[2].valueOrArray.f64                         == 0.2);
     assert(args2[3].type == Arg::TypeID::TI_Char);           assert(args2[3].valueOrArray.Char                        == '3');
     assert(args2[4].type == Arg::TypeID::TI_arrayof_Char);   assert(args2[4].valueOrArray.debugPtr == std::string(strArr[1]));
+    }
+
+    {
+    int16_t s[7] = { 1, -3, 5, -7, 9, -11, 13 };
+    UTL_logev(chan, "qwertyuiop", 127u, -7, "", -0.123f, '3', s); anchor__LINE__ = __LINE__;
+
+    while (!chan.isIdle()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
+
+    _utl::logging::EventAttributes attr = parseEventAttributes(wtr);
+    auto args = parseEvent(wtr);
+
+    const auto ID = _utl::logging::EventAttributes::getNewEventID();
+    REQUIRE(attr.argumentsExpected == 6);
+    REQUIRE(attr.id                == ID-1);
+    REQUIRE(attr.line              == anchor__LINE__);
+    REQUIRE(std::strstr(__FILE__     , attr.file.str        ));
+    REQUIRE(std::strstr(__FUNCTION__ , attr.function.str    ));
+    REQUIRE(std::strstr("qwertyuiop", attr.messageFormat.str));
+
+    assert(args[0].type == Arg::TypeID::TI_u32);            assert(args[0].valueOrArray.u32                 == 127u);
+    assert(args[1].type == Arg::TypeID::TI_i32);            assert(args[1].valueOrArray.i32                   == -7);
+    assert(args[2].type == Arg::TypeID::TI_arrayof_Char);   assert(args[2].valueOrArray.debugPtr == std::string(""));
+    assert(args[3].type == Arg::TypeID::TI_f32);            assert(args[3].valueOrArray.f32              == -0.123f);
+    assert(args[4].type == Arg::TypeID::TI_Char);           assert(args[4].valueOrArray.Char                 == '3');
+    assert(args[5].type == Arg::TypeID::TI_arrayof_i16);    assert(args[5].arrayLength                         == 7);
+    assert(std::memcmp(args[5].valueOrArray.ArrayPointer, s, sizeof(int16_t) * args[5].arrayLength)            == 0);
+    }
 }
 
 TEST_CASE("2 The dummies", "[benchmark]")
 {
     DummyEventFormatter fmt{};
     _utl::DummyWriter dwtr{};
-    Logger l{FMT_THREADS_NUMBER, fmt, dwtr, 512'000, 512'000, 2, 2, "Dummies"};
+    Logger l{FMT_THREADS_NUMBER, fmt, dwtr, 512'000, 512'000, 200, 200};
 
     size_t N = 1'000'000;
     std::vector<std::chrono::steady_clock::time_point> t;
@@ -371,6 +450,8 @@ TEST_CASE("2 The dummies", "[benchmark]")
 
 TEST_CASE("3 Usual use", "[benchmark]")
 {
+    size_t N = 1'000'000;
+
     static std::array<char,512> buf;
     std::fill(buf.begin(), buf.end(), '\xDB');
 
@@ -378,13 +459,18 @@ TEST_CASE("3 Usual use", "[benchmark]")
     FlatBufferWriter wtr{ buf.data(), buf.size() };
     _utl::DummyWriter dwtr{};
 
-    Logger chanD(FMT_THREADS_NUMBER, fmt, dwtr, 512'000, 512'000, 1024'000, 512'000, "UsualA");
-    Logger chan(FMT_THREADS_NUMBER, fmt, wtr, 512'000, 512'000, 1024'000, 512'000, "UsualB");
+    Logger chan (FMT_THREADS_NUMBER, fmt, wtr,  N*6, 1'000, 2'000, 1'000);
+    Logger chanD(FMT_THREADS_NUMBER, fmt, dwtr, N*6, 1'000, 2'000, 1'000);
+    Logger chan2(FMT_THREADS_NUMBER*2, fmt, dwtr,  N*6, 1'000, 2'000, 1'000);
 
     std::vector<std::chrono::steady_clock::time_point> t;
     t.reserve(8);
-    size_t N = 1'000'000;
 
+    t.emplace_back(std::chrono::steady_clock::now());
+    for (int i = 0; i < 1'000'000; ++i)
+    {
+        UTL_logev(chan, "1234567890-", 1u, -1-i, 0.2, '3', strArr[i%2]);
+    }
     t.emplace_back(std::chrono::steady_clock::now());
     for (int i = 0; i < 1'000'000; ++i)
     {
@@ -393,7 +479,7 @@ TEST_CASE("3 Usual use", "[benchmark]")
     t.emplace_back(std::chrono::steady_clock::now());
     for (int i = 0; i < 1'000'000; ++i)
     {
-        UTL_logev(chan, "1234567890-", 1u, -1-i, 0.2, '3', strArr[i%2]);
+        UTL_logev(chan2, "1234567890-", 1u, -1-i, 0.2, '3', strArr[i%2]);
     }
     t.emplace_back(std::chrono::steady_clock::now());
 
@@ -402,7 +488,6 @@ TEST_CASE("3 Usual use", "[benchmark]")
         auto dur = std::chrono::duration_cast<std::chrono::nanoseconds>(t[i] - t[i-1]);
         std::cout << "All events [" << i << "] take " << dur.count() << "ns; 1 event takes " << (dur / N).count() << "ns" << std::endl;
     }
-    std::this_thread::sleep_for(std::chrono::seconds{5});
 }
 
 /*

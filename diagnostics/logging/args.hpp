@@ -83,7 +83,9 @@ namespace _utl { namespace logging {
                 sizeof(TimePoint), sizeof(TimePoint),
             };
             if (unsigned(type) >= (unsigned) TypeID::__TYPE_ID_COUNT) {
-                throw std::runtime_error{ "Arg::typeSize() was given an invalid type ID" };
+                char msg[64];
+                std::snprintf(msg, 64, "Arg::typeSize() was given an invalid type ID=0x%x(=%u)", (unsigned) type, (unsigned) type);
+                throw std::runtime_error{ msg };
             }
             return typeId2Size[(unsigned) type];
         }
@@ -138,10 +140,11 @@ namespace {
         arg->type = Arg::TypeID::TI_Thread;
         std::memcpy(&arg->valueOrArray.Thread, &a, sizeof(a));
     }
+
     inline void fillArgsBuffer_sfinae_pchar(Arg * arg, const char * p) {
         arg->type = static_cast<Arg::TypeID>((int)TypeIDGetter<char>::value | (int)Arg::TypeID::__ISARRAY);
         arg->valueOrArray.ArrayPointer = p;
-        arg->arrayLength = std::strlen(p);
+        arg->arrayLength = std::strlen(p) + /*null symbol*/1;
     }
     inline void fillArgsBuffer_sfinae(Arg * arg, const char * p) {
         fillArgsBuffer_sfinae_pchar(arg, p);
@@ -149,17 +152,24 @@ namespace {
     inline void fillArgsBuffer_sfinae(Arg * arg, char * p) {
         fillArgsBuffer_sfinae_pchar(arg, p);
     }
+
     template<class C, class D> inline void fillArgsBuffer_sfinae(Arg * arg, std::chrono::time_point<C,D> && a) {
         arg->type = Arg::TypeID::TI_EpochNsec;
         arg->valueOrArray.EpochNsec = a.time_since_epoch().count();
     }
-    template<size_t N> inline void fillArgsBuffer_sfinae(Arg * arg, const char (&p)[N]) {
-        arg->type = static_cast<Arg::TypeID>((int)TypeIDGetter<char>::value | (int)Arg::TypeID::__ISARRAY);
+
+    template<class T, size_t N> inline void fillArgsBuffer_sfinae(Arg * arg, T (*p)[N]) {
+        arg->type = static_cast<Arg::TypeID>((int)TypeIDGetter<T>::value | (int)Arg::TypeID::__ISARRAY);
         arg->valueOrArray.ArrayPointer = &p[0];
-        arg->arrayLength = N-1;
+        arg->arrayLength = std::is_same<std::remove_cv_t<T>,char>::value ? N-1 : N;
     }
+    template<class T, size_t N> inline void fillArgsBuffer_sfinae(Arg * arg, T (&p)[N]) {
+        fillArgsBuffer_sfinae(arg, &p);
+    }
+
     template<class T> inline void fillArgsBuffer_sfinae(Arg * arg, T && a) {
         arg->type = TypeIDGetter<T>::value;
+        assert(! (TypeIDGetter<T>::value & Arg::TypeID::__ISARRAY));
         std::memcpy(&arg->valueOrArray, &a, sizeof(T));
     }
 
@@ -167,15 +177,27 @@ namespace {
         fillArgsBuffer_sfinae(argBuf++, std::forward<T&&>(fst));
         fillArgsBuffer_sfinae(argBuf, std::forward<Ts&&>(args)...);
     }
-    inline void fillArgsBuffer_sfinae(Arg * argBuf) {}
+    inline void fillArgsBuffer_sfinae(Arg *) {}
 
 } // anonimous namespace
 
 namespace internal {
 
-    template<class...Ts> inline void fillArgsBuffer(Arg * argBuf, Ts &&... args)
+    template<class...Ts> inline size_t fillArgsBuffer(size_t expectedCount, Arg * argBuf, Ts &&... args)
     {
+        if (sizeof...(args) != expectedCount)
+        {
+            throw std::logic_error{"fillArgsBuffer is screwed!"};
+        }
+
         fillArgsBuffer_sfinae(argBuf, std::forward<Ts&&>(args)...);
+
+        size_t total = 0;
+        for (size_t i = 0; i < expectedCount; ++i)
+        {
+            total += Arg::typeSize(argBuf[i].type);
+        }
+        return total;
     }
 
 } // internal namespace

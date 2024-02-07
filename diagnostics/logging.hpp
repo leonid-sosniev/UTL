@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <deque>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -24,58 +25,14 @@
 #include <utl/diagnostics/logging/internal/LocklessQueue.hpp>
 #include <utl/diagnostics/logging/internal/LocklessCircularAllocator.hpp>
 
-#define DBG(x)
+#include <utl/diagnostics/logging/internal/DebuggingMacros.hpp>
 
 namespace {
 
-    template<typename T>
-    //using CircularAllocator = _utl::ThreadSafeCircularAllocator<sizeof(T)>;
-    using CircularAllocator = _utl::SimpleAllocator<sizeof(T)>;
-    template<typename T>
-    using Queue = _utl::ThreadSafeCircularQueue<T>;
-
-    /// @brief Helper class to replace std::vector as std::vector<T>::reserve triggers c-tor of T
-    /// @tparam T 
-    template<typename T> class Array
-    {
-        using Item = uint8_t[sizeof(T)];
-        T * begin_;
-        T * end_;
-        uint32_t capacity_;
-    public:
-        Array()
-            : begin_(nullptr)
-            , end_(nullptr)
-            , capacity_(0)
-        {
-        }
-        ~Array()
-        {
-            assert(end_ - begin_ == capacity_);
-            for (auto p = begin_; p < end_; ++p)
-            {
-                p->T::~T();
-                std::memset(p, '\0', sizeof(T));
-            }
-            delete[] (Item*) begin_;
-            end_ = begin_ = nullptr;
-        }
-        void reserve(uint32_t capacity)
-        {
-            assert(!begin_);
-            begin_ = end_ = (T*) new Item[capacity];
-            capacity_ = capacity;
-        }
-        template<typename ...TArgs> void emplace_back(TArgs &&... args)
-        {
-            assert(end_ - begin_ < capacity_);
-            new (end_) T{std::forward<TArgs &&>(args)...};
-            ++end_;
-        }
-        T * begin() { return begin_; }
-        T * end() { return end_; }
-        T & operator[](size_t i) { return begin_[i]; }
-    };
+    template<typename T> using ArgAllocator = _utl::ThreadSafeCircularAllocator<T>;
+    template<typename T> using FormatterAllocator = _utl::ThreadSafeCircularAllocator<T>;
+    template<typename T> using EventQueue = _utl::ThreadSafeCircularQueue<T>;
+    template<typename T> using WriterQueue = _utl::BlockingQueue<T>;
 
 } // namespace internal
 
@@ -109,59 +66,133 @@ namespace _utl { namespace logging {
     };
     std::atomic<uint32_t> EventAttributes::ID_COUNTER{1};
 
+    struct Block {
+        Block * next;
+        const void * data;
+        uint16_t size;
+    };
+    class MemoryResource;
+    struct BlockList {
+        MemoryResource * memoryResource;
+        Block * firstBlock;
+        uint32_t totalAllocatedSize;
+        uint32_t totalAllocationsNumber;
+    };
+
     class MemoryResource {
     private:
         friend class Logger;
-        struct Block {
-            CircularAllocator<char> * formattedDataAllocator;
-            const void * data;
-            uint16_t size;
-            uint16_t capacity;
-        };
-        Queue<Block> & writerDataQueue_;
-        CircularAllocator<char> & formattedDataAllocator_;
-        char * lastAllocatedPtr_;
-        uint16_t lastAllocatedSize_;
-        std::atomic_bool available_;
-    public:
-        MemoryResource(Queue<Block> & writerDataQueue, CircularAllocator<char> & formattedDataAllocator)
-            : formattedDataAllocator_(formattedDataAllocator)
-            , writerDataQueue_(writerDataQueue)
-            , lastAllocatedPtr_(nullptr)
-            , lastAllocatedSize_(0)
-            , available_(true)
+        FormatterAllocator<char> & formattedDataAllocator_;
+        WriterQueue<BlockList> & writerInputQueue_;
+        Block * lastBlock_;
+        BlockList pendingBlockList_;
+        bool mustSubmit_;
+    private:
+        /// @brief This is to be invoked right after the event if completely formatted. Sends all formatted data blocks to writer.
+        void friend_sendPendingBlocksToWriter()
         {
+            if (mustSubmit_) {
+                throw std::logic_error{"Bad formatter: Every allocate() call must be followed by a submitAllocated() call!"};
+            }
+            writerInputQueue_.enqueue(std::move(pendingBlockList_));
+            pendingBlockList_.firstBlock = nullptr;
+            pendingBlockList_.totalAllocatedSize = pendingBlockList_.totalAllocationsNumber = 0;
+        }
+        /// @brief This is to be invoked by writer. Deallocates all data of the last event, nullifies pointers to it.
+        void friend_cleanupWrittenEventData(uint32_t totalAllocatedSize)
+        {
+            formattedDataAllocator_.release(totalAllocatedSize);
+        }
+    public:
+        MemoryResource(WriterQueue<BlockList> & writerDataQueue, FormatterAllocator<char> & formattedDataAllocator)
+            : formattedDataAllocator_(formattedDataAllocator)
+            , writerInputQueue_(writerDataQueue)
+            , lastBlock_(nullptr)
+            , pendingBlockList_{this, nullptr, 0, 0}
+            , mustSubmit_(false)
+        {
+            assert(pendingBlockList_.memoryResource == this);
         }
         char * allocate(uint16_t initialSize)
         {
-            if (!available_)
-            {
-                throw std::logic_error{"The memory resource became unavailable"};
-            }
-            assert(lastAllocatedPtr_ == nullptr);
-            lastAllocatedSize_ += initialSize;
-            lastAllocatedPtr_ = static_cast<char *>(formattedDataAllocator_.acquire(initialSize));
-            assert(lastAllocatedPtr_ != nullptr);
-            return lastAllocatedPtr_;
+            mustSubmit_ = true;
+            auto dataBuff = formattedDataAllocator_.acquire(initialSize);
+            assert(dataBuff);
+            assert(pendingBlockList_.memoryResource == this);
+            pendingBlockList_.totalAllocationsNumber += 1;
+            pendingBlockList_.totalAllocatedSize += initialSize;
+            return static_cast<char*>(dataBuff);
         }
-        void submitAllocated(uint16_t meaningfulDataSize)
+        void submitAllocated(const void * data, uint16_t dataSize)
         {
-            assert(meaningfulDataSize <= lastAllocatedSize_);
-            writerDataQueue_.enqueue(
-                Block{&formattedDataAllocator_, lastAllocatedPtr_, meaningfulDataSize, lastAllocatedSize_}
-            );
-            lastAllocatedPtr_ = nullptr;
-            lastAllocatedSize_ = 0;
+            auto *segmBuff = allocate(sizeof(Block));
+            auto *segm = new(segmBuff) Block{ nullptr, data, dataSize };
+            if (pendingBlockList_.firstBlock) {
+                assert(lastBlock_);
+                assert(!lastBlock_->next);
+                lastBlock_->next = segm;
+            } else {
+                pendingBlockList_.firstBlock = segm;
+            }
+            lastBlock_ = segm;
+            mustSubmit_ = false;
         }
         void submitStaticConstantData(const void * data, uint16_t size)
         {
-            writerDataQueue_.enqueue(
-                Block{&formattedDataAllocator_, data, size, 0}
-            );
+            submitAllocated(data, size);
         }
-        std::string debugName_;
+#if !defined(NDEBUG)
+        std::string debugName;
+#endif
     };
-    
+
+    constexpr size_t paddingTo(const size_t value, const size_t alignment) {
+        return (value + (alignment - 1)) / alignment * alignment - value;
+    }
+
+    class WriterWorker
+    {
+        std::thread thread_;
+    public:
+        ~WriterWorker()
+        {
+            if (thread_.joinable())
+            {
+                thread_.join();
+            }
+        }
+        WriterWorker(std::function<void()> threadMainFunction)
+            : thread_(threadMainFunction)
+        {
+        }
+    };
+
+    class alignas(64) FormatterWorker
+    {
+        FormatterAllocator<char> formattedDataAllocator_;
+        MemoryResource loggerDataProxy_;
+        std::thread thread_;
+        char padding[paddingTo(sizeof(thread_) + sizeof(loggerDataProxy_) + sizeof(formattedDataAllocator_), 64)];
+    public:
+        ~FormatterWorker()
+        {
+            if (thread_.joinable())
+            {
+                thread_.join();
+            }
+        }
+        FormatterWorker(
+            uint32_t formattedDataBufferSize, WriterQueue<BlockList> & writerInputQueue,
+            std::function<void(MemoryResource *)> threadMainFunction
+        )
+            : formattedDataAllocator_(formattedDataBufferSize)
+            , loggerDataProxy_(writerInputQueue, formattedDataAllocator_)
+            , thread_(threadMainFunction, &loggerDataProxy_)
+        {
+        }
+    };
+    static_assert(sizeof(FormatterWorker) % 64 == 0, "The FormatterWorker must align to the cache boundary");
+
     class AbstractEventFormatter {
     protected:
         virtual void formatEventAttributes_(MemoryResource & mem, const EventAttributes & attr) = 0;
@@ -179,138 +210,137 @@ namespace _utl { namespace logging {
     };
 
     class Logger {
-    public:
-        std::string debugName_;
     private:
-        struct Ev
+        // initialization order here matters much
+        struct Event
         {
             const EventAttributes * attr;
             const Arg * args;
         };
-        Queue<Ev> eventQueue_;
-        CircularAllocator<Arg> argAllocator_;
-        Array<CircularAllocator<char>> formattedDataAllocators_;
-        Array<MemoryResource> mems_;
-        Array<std::thread> threadsOfFormatters_;
-        Queue<MemoryResource::Block> writerDataQueue_;
+        // stateless formatter objects and stateful writer objects
         AbstractEventFormatter * fmt_;
         AbstractWriter * wtr_;
-        volatile std::atomic<int8_t> isStopRequested_;
-        std::thread threadW_;
+        // inter-worker data channels
+        ArgAllocator<Arg> argAllocator_;
+        EventQueue<Event> eventQueue_;
+        WriterQueue<BlockList> writerInputQueue_;
+        /// must be set before formatterWorkers_ and writerWorker_
+        volatile std::atomic_bool isFormattersStopRequested_;
+        // must be destructed before formatterWorkers_
+        WriterWorker writerWorker_;
+        // must be initialized after fmt_, isFormattersStopRequested_
+        std::deque<FormatterWorker> formatterWorkers_;
     private:
         void formatterLoop(MemoryResource * mem)
         {
+            DBG_THREAD_NAME(mem->debugName + "_fmt")
             MemoryResource &mem_ = *mem;
-            DBG_FUNC(mem->debugName_ + "_fmt")
-            Ev ev{};
-            while (true)
-            {
-                if (eventQueue_.tryDequeue(ev))
+            try {
+                Event ev{};
+                while (true)
                 {
-                    try
+                    if (isFormattersStopRequested_)
                     {
-                        assert(ev.attr);
-                        if (ev.args)
+                        break;
+                    }
+                    else
+                    if (eventQueue_.tryDequeue(ev))
+                    {
+                        try
                         {
-                            fmt_->formatEvent(mem_, *ev.attr, ev.args);
-                            argAllocator_.release(ev.attr->argumentsExpected);
+                            assert(ev.attr);
+                            if (ev.args)
+                            {
+                                fmt_->formatEvent(mem_, *ev.attr, ev.args);
+                                mem_.friend_sendPendingBlocksToWriter();
+                                argAllocator_.release(ev.attr->argumentsExpected);
+                            }
+                            else
+                            {
+                                fmt_->formatEventAttributes(mem_, *ev.attr);
+                            }
                         }
-                        else
+                        catch (std::logic_error &)
                         {
-                            fmt_->formatEventAttributes(mem_, *ev.attr);
                         }
                     }
-                    catch (std::logic_error &)
+                    else
                     {
+                        std::this_thread::sleep_for(std::chrono::milliseconds{1});
                     }
-                }
-                else
-                if (isStopRequested_)
-                {
-                    if (mem->available_)
-                    {
-                        mem->available_.store(false);
-                    }
-                    else break;
-                }
-                else
-                {
-                    std::this_thread::sleep_for(std::chrono::milliseconds{1});
                 }
             }
-            std::cerr << DBG_FUNC_GET_NAME() << " has ended its work" << std::endl;
+            catch (...)
+            {
+                std::cerr << DBG_THREAD_GET_NAME() << " has ended its work" << std::endl;
+            }
         }
         void writerLoop()
         {
-            DBG_FUNC(debugName_ + "_writer");
             while (true)
             {
-                MemoryResource::Block blk{};
-                if (writerDataQueue_.tryDequeue(blk))
+                BlockList writableBlocks{};
+                if (writerInputQueue_.tryDequeue(writableBlocks))
                 {
-                    wtr_->write(blk.data, blk.size);
-                    if (blk.capacity)
+                    auto count = writableBlocks.totalAllocationsNumber;
+                    for (auto *blk = writableBlocks.firstBlock; blk; blk = blk->next)
                     {
-                        blk.formattedDataAllocator->release(blk.capacity);
+                        assert(count);
+                        wtr_->write(blk->data, blk->size);
+                        count -= 1;
                     }
-                }
-                else if (!isStopRequested_)
-                {
-                    wtr_->flush();
+                    writableBlocks.memoryResource->friend_cleanupWrittenEventData(writableBlocks.totalAllocatedSize);
                 }
                 else
+                if (isFormattersStopRequested_)
                 {
                     break;
                 }
+                else
+                {
+                    wtr_->flush();
+                }
             }
-            std::cerr << DBG_FUNC_GET_NAME() << " writer has ended its work" << std::endl;
+            std::cerr << DBG_THREAD_GET_NAME() << " writer has ended its work" << std::endl;
         }
     public:
         Logger(const Logger &) = delete;
         Logger(Logger &&) = delete;
         Logger &operator=(const Logger &) = delete;
         Logger &operator=(Logger &&) = delete;
-        Logger(uint16_t formatterMaxNumber, AbstractEventFormatter & fmt, AbstractWriter & wtr, uint32_t argsBufferLength, uint32_t eventsBufferLength, uint32_t formattingBufferSize, uint32_t writtingQueueLength, std::string debugName)
+        Logger(uint16_t formatterMaxNumber, AbstractEventFormatter & fmt, AbstractWriter & wtr, uint32_t argsBufferLength, uint32_t eventsBufferLength, uint32_t formattingBufferSize, uint32_t writtingQueueLength)
             : fmt_(&fmt)
             , wtr_(&wtr)
-            , eventQueue_(eventsBufferLength)
             , argAllocator_(argsBufferLength)
-            , writerDataQueue_(writtingQueueLength)
-            , isStopRequested_{false}
-            , threadW_(&Logger::writerLoop, this)
-            , debugName_(debugName)
+            , eventQueue_(eventsBufferLength)
+            , writerInputQueue_(writtingQueueLength)
+            , isFormattersStopRequested_{false}
+            , writerWorker_([this]() { writerLoop(); })
+            , formatterWorkers_()
         {
-            DBG_FUNC(debugName_ + "_logger");
-            formattedDataAllocators_.reserve(formatterMaxNumber);
-            threadsOfFormatters_.reserve(formatterMaxNumber);
-            mems_.reserve(formatterMaxNumber);
             for (size_t i = 0; i < formatterMaxNumber; ++i)
             {
-                formattedDataAllocators_.emplace_back(formattingBufferSize);
-                mems_.emplace_back(writerDataQueue_, formattedDataAllocators_[i]);
-                mems_[i].debugName_ = debugName_ + std::to_string(i);
-                threadsOfFormatters_.emplace_back(&Logger::formatterLoop, this, &mems_[i]);
+                formatterWorkers_.emplace_back(
+                    formattingBufferSize,
+                    writerInputQueue_,
+                    [this,i](MemoryResource * m) {
+#if defined(DEBUG)
+                        m->debugName = "fmt#" + std::to_string(i);
+#endif
+                        formatterLoop(m);
+                    }
+                );
             }
         }
         ~Logger()
         {
-            std::cerr << DBG_FUNC_GET_NAME() << std::endl;
-            for (auto &th : threadsOfFormatters_)
-            {
-                isStopRequested_.store(true);
-                if (th.joinable())
-                {
-                    th.join();
-                }
-            }
-            if (threadW_.joinable())
-            {
-                isStopRequested_.store(true);
-                threadW_.join();
-            }
+            std::cerr << DBG_THREAD_GET_NAME() << std::endl;
+            isFormattersStopRequested_.store(true);
         }
         Arg * allocateArgsBuffer(const EventAttributes & attr) {
-            return static_cast<Arg *>(argAllocator_.acquire(attr.argumentsExpected));
+            auto p = static_cast<Arg *>(argAllocator_.acquire(attr.argumentsExpected));
+            p[attr.argumentsExpected] = Arg{nullptr, Arg::TypeID::TI_NONE, 0};
+            return p;
         }
         void registerEventAttributes(const EventAttributes & attr) {
             eventQueue_.enqueue({&attr,nullptr});
@@ -318,6 +348,12 @@ namespace _utl { namespace logging {
         void logEvent(const EventAttributes & attr, const Arg args[]) {
             eventQueue_.enqueue({&attr,args});
         }
+        bool isIdle() const {
+            return eventQueue_.isEmpty() && writerInputQueue_.isEmpty();
+        }
+#if defined(DEBUG)
+        std::string debugName;
+#endif
     };
 
 namespace {
@@ -354,12 +390,14 @@ namespace {
     }
     template<class...Ts> inline void logEvent(Logger & logger, const EventAttributes & attributes, Ts &&... argsPack)
     {
-        assert(attributes.argumentsExpected);
+        assert(sizeof...(Ts) == attributes.argumentsExpected);
         Arg * args = logger.allocateArgsBuffer(attributes);
-        _utl::logging::internal::fillArgsBuffer(args, std::forward<Ts&&>(argsPack)...);
+        _utl::logging::internal::fillArgsBuffer(attributes.argumentsExpected, args, std::forward<Ts&&>(argsPack)...);
         logger.logEvent(attributes, args);
     }
-}
+} // namespace anonymous
+
+    #define UNUSED(...)
     #define UTL_LOG_EVENT_ID cpd.id
     #define UTL_logev(CHANNEL, MESSAGE, ...) { \
         static const _utl::logging::EventAttributes cpd{ \
@@ -371,6 +409,7 @@ namespace {
             _utl::logging::count_of(__VA_ARGS__) \
         }; \
         static const auto purposed_to_call_registerEvent_once = _utl::logging::registerEvent(CHANNEL,cpd); \
+        (void) purposed_to_call_registerEvent_once; \
         _utl::logging::logEvent(CHANNEL,cpd,##__VA_ARGS__); \
     }
 

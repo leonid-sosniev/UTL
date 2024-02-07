@@ -6,13 +6,20 @@
 #include <string>
 #include <map>
 
+#if defined(USE_CATCH2)
+
+#define CATCH_CONFIG_ENABLE_BENCHMARKING
+#include <utl/Catch2/single_include/catch2/catch.hpp>
+
+#else // #if defined(USE_CATCH2)
+
 namespace _utl
 {
 
 class Tester
 {
     friend class TesterRegister;
-    static std::map<std::string,std::function<void()>> tests_;
+    static std::map<std::string,void(*)()> tests_;
 public:
     static void run(const std::string & name = "")
     {
@@ -23,7 +30,7 @@ public:
                 continue;
             }
             assert(name_func.second);
-            std::cerr << "Running " << name_func.first << std::endl;
+            std::cerr << "Running '" << name_func.first << "' test case" << std::endl;
             try {
                 name_func.second();
             }
@@ -37,11 +44,11 @@ public:
     }
 };
 
-std::map<std::string,std::function<void()>> Tester::tests_{};
+std::map<std::string,void(*)()> Tester::tests_{};
 
 struct TesterRegister
 {
-    TesterRegister(const std::string & name, std::function<void()> action)
+    TesterRegister(const std::string & name, void(*action)())
     {
         Tester::tests_.insert({name, action});
     }
@@ -56,14 +63,14 @@ struct TesterRegister
 #define REQUIRE(x) assert(x)
 
 #define TEST_CASE(TEST_NAME, ...) \
-    namespace _utl_tester_cases { \
-        void UTL_CONCAT_NAME_LINE(utl_tester_test_case_,__LINE__)(); \
+    namespace UTL_CONCAT_NAME_LINE(_utl_tester_cases,__LINE__) { \
+        static void UTL_CONCAT_NAME_LINE(utl_tester_test_case_,__LINE__)(); \
         static _utl::TesterRegister UTL_CONCAT_NAME_LINE(utl_tester_test_case_register_,__LINE__){ \
             TEST_NAME, \
             UTL_CONCAT_NAME_LINE(utl_tester_test_case_,__LINE__) \
         }; \
     } \
-    void _utl_tester_cases::UTL_CONCAT_NAME_LINE(utl_tester_test_case_,__LINE__)()
+    static void UTL_CONCAT_NAME_LINE(_utl_tester_cases,__LINE__)::UTL_CONCAT_NAME_LINE(utl_tester_test_case_,__LINE__)()
 
 
 #if defined(CATCH_CONFIG_MAIN)
@@ -76,4 +83,6 @@ int main(int argc, char ** argv)
     _utl::Tester::run();
 }
 
-#endif
+#endif // #if defined(CATCH_CONFIG_MAIN)
+
+#endif // #if defined(USE_CATCH2)
