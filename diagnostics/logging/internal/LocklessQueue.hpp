@@ -2,47 +2,40 @@
 
 #include <cstdint>
 
+#include <mutex>
 #include <atomic>
 #include <memory>
 #include <type_traits>
 
 namespace _utl {
 
-    class ThreadSafeQueueStrategy_LocklessSingleReaderSingleWriter
+    class ThreadSafeQueueStrategy_NoLock
     {
     public:
-        bool isAllowedToEnqueue() { return true; }
-        void finishEnqueue() {}
-        bool isAllowedToDequeue() { return true; }
-        void finishDequeue() {}
+        bool try_lock() noexcept { return true; }
+        void unlock() {}
     };
 
-    class ThreadSafeQueueStrategy_ManyReadersManyWriters
+    class ThreadSafeQueueStrategy_AtomicLock
     {
-        std::atomic_flag isAdding_{false};
-        std::atomic_flag isRemoving_{false};
+        std::atomic_flag flag_{false};
     public:
-        bool isAllowedToEnqueue()
+        bool try_lock() noexcept
         {
-            bool old = isAdding_.test_and_set();
+            bool old = flag_.test_and_set();
             return !old;
         }
-        void finishEnqueue()
+        void unlock()
         {
-            isAdding_.clear();
-        }
-        bool isAllowedToDequeue()
-        {
-            bool old = isRemoving_.test_and_set();
-            return !old;
-        }
-        void finishDequeue()
-        {
-            isRemoving_.clear();
+            flag_.clear();
         }
     };
 
-    template<typename TItem, typename Strategy = ThreadSafeQueueStrategy_ManyReadersManyWriters>
+    template<
+        typename TItem,
+        typename EnqueueLockStrategy = ThreadSafeQueueStrategy_AtomicLock,
+        typename DequeueLockStrategy = ThreadSafeQueueStrategy_AtomicLock
+        >
     class ThreadSafeCircularQueue
     {
         static_assert(std::is_trivial<TItem>::value, "The given TItem must be trivial so that dequeueing operation is safe");
@@ -50,7 +43,8 @@ namespace _utl {
         const uint32_t capacity_;
         std::atomic<uint32_t> begin_;
         std::atomic<uint32_t> end_;
-        Strategy rwStrategy_;
+        EnqueueLockStrategy encStrategy_;
+        DequeueLockStrategy deqStrategy_;
 #if defined(DEBUG)
         std::string debugName_;
 #endif
@@ -81,7 +75,7 @@ namespace _utl {
             if (newEnd != begin)
             // not full
             {
-                if (rwStrategy_.isAllowedToEnqueue())
+                if (encStrategy_.try_lock())
                 {
                     items_[end] = item;
                     if (end_.compare_exchange_strong(end, newEnd))
@@ -89,7 +83,7 @@ namespace _utl {
                     {
                         result = true;
                     }
-                    rwStrategy_.finishEnqueue();
+                    encStrategy_.unlock();
                 }
                 else
                 {
@@ -109,7 +103,7 @@ namespace _utl {
             if (begin != end)
             // the queue is not empty
             {
-                if (rwStrategy_.isAllowedToDequeue())
+                if (deqStrategy_.try_lock())
                 // allowed to dequeue
                 {
                     dest = items_[begin];
@@ -118,7 +112,7 @@ namespace _utl {
                     {
                         result = true;
                     }
-                    rwStrategy_.finishDequeue();
+                    deqStrategy_.unlock();
                 }
             }
             return result;

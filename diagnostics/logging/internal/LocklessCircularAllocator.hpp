@@ -10,10 +10,19 @@ class ThreadNames
     mutable std::mutex mux_;
     std::map<std::thread::id,std::string> names_;
 public:
-    void setName(std::string name)
+    void setName(const std::string & name, size_t index = size_t(-1))
     {
         std::unique_lock<std::mutex> lock{mux_};
-        names_[std::this_thread::get_id()] = std::move(name);
+        std::string &saved = names_[std::this_thread::get_id()];
+        if (size_t(-1) == index) {
+            saved = name;
+        } else {
+            saved.resize(name.size() + (index < uint16_t(-1) ? 5 : 20));
+            auto len = std::snprintf(const_cast<char*>(saved.data()), saved.size(), "%s_%zu", name.c_str(), index);
+            assert(len > 0);
+            saved.resize(len);
+        }
+        pthread_setname_np(pthread_self(), saved.c_str());
     }
     std::string getName(std::thread::id threadId)
     {
@@ -41,7 +50,16 @@ public:
     }
 };
 Singleton<ThreadNames> g_threadNames;
-#define DBG_FUNC(NAME_STR) g_threadNames.getInstance().setName(NAME_STR);
+
+#if defined(NDEBUG)
+ #define DBG_FUNC_N(NAME_STR, INDEX)
+ #define DBG_FUNC(NAME_STR)
+ #define DBG_FUNC_GET_NAME() ""
+#else
+ #define DBG_FUNC_N(NAME_STR, INDEX) g_threadNames.getInstance().setName(NAME_STR, INDEX);
+ #define DBG_FUNC(NAME_STR) g_threadNames.getInstance().setName(NAME_STR);
+ #define DBG_FUNC_GET_NAME() g_threadNames.getInstance().getName()
+#endif
 
 namespace _utl {
 
@@ -216,7 +234,7 @@ namespace _utl {
         }
         SimpleAllocator(
             uint32_t length
-            , std::string debugName
+            , std::string debugName = ""
         )
             : capacity_(length)
             , length_(0)

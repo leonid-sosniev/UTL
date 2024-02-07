@@ -282,6 +282,8 @@ void printDump(const char * data, size_t size)
 
 const char * strArr[2] = { "4", "some text" };
 
+static const auto FMT_THREADS_NUMBER = std::min<uint16_t>(std::thread::hardware_concurrency(), 4);
+
 TEST_CASE("1 smoke sequential", "[event][validation]")
 {
     static std::array<char,512> buf;
@@ -289,7 +291,7 @@ TEST_CASE("1 smoke sequential", "[event][validation]")
 
     RawEventFormatter fmt{};
     FlatBufferWriter wtr{ buf.data(), buf.size() };
-    Logger chan(fmt, wtr, 64, 300, 1024, 300);
+    Logger chan(1, fmt, wtr, 64, 300, 1024, 300, "Smoke");
 
     // all data fits in the buffer
     uint32_t anchor__LINE__;
@@ -334,7 +336,7 @@ TEST_CASE("2 The dummies", "[benchmark]")
 {
     DummyEventFormatter fmt{};
     _utl::DummyWriter dwtr{};
-    Logger l{fmt, dwtr, 512'000, 512'000, 2, 2};
+    Logger l{FMT_THREADS_NUMBER, fmt, dwtr, 512'000, 512'000, 2, 2, "Dummies"};
 
     size_t N = 1'000'000;
     std::vector<std::chrono::steady_clock::time_point> t;
@@ -376,8 +378,8 @@ TEST_CASE("3 Usual use", "[benchmark]")
     FlatBufferWriter wtr{ buf.data(), buf.size() };
     _utl::DummyWriter dwtr{};
 
-    Logger chanD(fmt, dwtr, 512'000, 512'000, 1024'000, 512'000);
-    Logger chan(fmt, wtr, 512'000, 512'000, 1024'000, 512'000);
+    Logger chanD(FMT_THREADS_NUMBER, fmt, dwtr, 512'000, 512'000, 1024'000, 512'000, "UsualA");
+    Logger chan(FMT_THREADS_NUMBER, fmt, wtr, 512'000, 512'000, 1024'000, 512'000, "UsualB");
 
     std::vector<std::chrono::steady_clock::time_point> t;
     t.reserve(8);
@@ -400,6 +402,7 @@ TEST_CASE("3 Usual use", "[benchmark]")
         auto dur = std::chrono::duration_cast<std::chrono::nanoseconds>(t[i] - t[i-1]);
         std::cout << "All events [" << i << "] take " << dur.count() << "ns; 1 event takes " << (dur / N).count() << "ns" << std::endl;
     }
+    std::this_thread::sleep_for(std::chrono::seconds{5});
 }
 
 /*
