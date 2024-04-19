@@ -27,7 +27,7 @@
                     "ignoreFailures": true
                 }
             ],
-            "miDebuggerPath": "/usr/bin/gdb",
+            "miDebuggerPath": "C:/mingw64/bin/gdb.exe",
             // "preLaunchTask": "(g++) Build Release",
             // "logging": { "programOutput":true, "trace":true, "traceResponse":true }
         }

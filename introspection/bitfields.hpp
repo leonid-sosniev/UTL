@@ -178,7 +178,6 @@ public:
         constexpr auto byteIndex = fp.offset / 8;
         constexpr auto inbyteOffset = fp.offset % 8;
         return BitFieldAccessor<tEndianness, inbyteOffset, fp.width>::read(bytes_ + byteIndex) & fp.mask;
-        return 0;
     }
     template<size_t tFieldIndex> void put(uintmax_t value)
     {

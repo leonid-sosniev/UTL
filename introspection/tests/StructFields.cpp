@@ -2,9 +2,15 @@
 //#include <utl/Catch2/single_include/catch2/catch.hpp>
 #define TEST_CASE(...) int main()
 #define REQUIRE(x) if (!(x)) { throw std::logic_error{std::to_string(__LINE__)}; }
+#define INFO(...) 
+
 #include <utl/introspection/StructFields.hpp>
+#include <utl/introspection/bitfields.hpp>
+
 #include <array>
 #include <cassert>
+#include <cstring>
+#include <iostream>
 #include <sstream>
 #include <vector>
 
@@ -113,10 +119,6 @@ void func() {}
 Visitor V;
 char emptyStr[1] = "";
 
-#include <iostream>
-#include <cstring>
-#include <utl/introspection/bitfields.hpp>
-
 bool compare(const void * mem, std::initializer_list<uint8_t> bytes)
 {
     auto a = static_cast<const uint8_t*>(mem);
@@ -139,6 +141,7 @@ template<size_t...Ws> using BEFields = _utl::PortableBitFieldsContainer<_utl::En
 TEST_CASE("get number of fields in struct", "introspection")
 {
     {
+    INFO("check _utl::Bitfields get and put do not interfere");
     _utl::Bitfields<uint64_t, 1, 8, 32, 23> bits;
     bits.put<3>(1);
     bits.put<2>(1);
@@ -152,6 +155,7 @@ TEST_CASE("get number of fields in struct", "introspection")
     }
 
     {
+    INFO("check how single-byte little-endian _utl::PortableBitFieldsContainer lays out its bits");
     // one byte
     LEFields<1,7> s;
     s.put<0>(1);
@@ -159,6 +163,7 @@ TEST_CASE("get number of fields in struct", "introspection")
     s.put<0>(0);
     REQUIRE(compare(s.data(), {0b11000110}));
 
+    INFO("check how multibyte little-endian _utl::PortableBitFieldsContainer lays out its bits");
     // multibyte
     uint8_t raw[9] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99 };
     const uint8_t raw2[9] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99 }; // same array to compare with later
@@ -223,5 +228,5 @@ TEST_CASE("get number of fields in struct", "introspection")
     _utl::PodIntrospection::processTopLevelFields(V, s3);
     V.commaIsNeeded = false; V.str << "\n";
 
-    std::cout << V.str.str() << std::endl;
+    REQUIRE(V.str.str() == "-4\n1, 0.5\nnullptr, true, false, \"hello\", 0.1, \"E::A\", union(sizeof=8), {-4}*, {1, 0.5}, (func), {\"\", \"\", \"\", \"\"}\n");
 }
