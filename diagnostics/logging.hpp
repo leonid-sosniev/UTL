@@ -167,31 +167,6 @@ namespace _utl { namespace logging {
         }
     };
 
-    class alignas(64) FormatterWorker
-    {
-        FormatterAllocator<char> formattedDataAllocator_;
-        MemoryResource loggerDataProxy_;
-        std::thread thread_;
-        char padding[paddingTo(sizeof(thread_) + sizeof(loggerDataProxy_) + sizeof(formattedDataAllocator_), 64)];
-    public:
-        ~FormatterWorker()
-        {
-            if (thread_.joinable())
-            {
-                thread_.join();
-            }
-        }
-        FormatterWorker(
-            uint32_t formattedDataBufferSize, WriterQueue<BlockList> & writerInputQueue,
-            std::function<void(MemoryResource *)> threadMainFunction
-        )
-            : formattedDataAllocator_(formattedDataBufferSize)
-            , loggerDataProxy_(writerInputQueue, formattedDataAllocator_)
-            , thread_(threadMainFunction, &loggerDataProxy_)
-        {
-        }
-    };
-    static_assert(sizeof(FormatterWorker) % 64 == 0, "The FormatterWorker must align to the cache boundary");
 
     class AbstractEventFormatter {
     protected:
@@ -229,12 +204,12 @@ namespace _utl { namespace logging {
         // must be destructed before formatterWorkers_
         WriterWorker writerWorker_;
         // must be initialized after fmt_, isFormattersStopRequested_
-        std::deque<FormatterWorker> formatterWorkers_;
+        std::deque<std::thread> formatterWorkers_;
     private:
-        void formatterLoop(MemoryResource * mem)
+        void formatterLoop(uint32_t formattedDataBufferSize, WriterQueue<BlockList> & writerInputQueue, uint16_t formatterIndex)
         {
-            DBG_THREAD_NAME(mem->debugName + "_fmt")
-            MemoryResource &mem_ = *mem;
+            FormatterAllocator<char> formattedDataAllocator(formattedDataBufferSize);
+            MemoryResource mem(writerInputQueue, formattedDataAllocator);
             try {
                 Event ev{};
                 while (true)
@@ -251,13 +226,13 @@ namespace _utl { namespace logging {
                             assert(ev.attr);
                             if (ev.args)
                             {
-                                fmt_->formatEvent(mem_, *ev.attr, ev.args);
-                                mem_.friend_sendPendingBlocksToWriter();
+                                fmt_->formatEvent(mem, *ev.attr, ev.args);
+                                mem.friend_sendPendingBlocksToWriter();
                                 argAllocator_.release(ev.attr->argumentsExpected);
                             }
                             else
                             {
-                                fmt_->formatEventAttributes(mem_, *ev.attr);
+                                fmt_->formatEventAttributes(mem, *ev.attr);
                             }
                         }
                         catch (std::logic_error &)
@@ -272,7 +247,7 @@ namespace _utl { namespace logging {
             }
             catch (...)
             {
-                std::cerr << DBG_THREAD_GET_NAME() << " has ended its work" << std::endl;
+                std::cerr << "Formatter #" << formatterIndex << " has ended its work" << std::endl;
             }
         }
         void writerLoop()
@@ -301,7 +276,6 @@ namespace _utl { namespace logging {
                     wtr_->flush();
                 }
             }
-            std::cerr << DBG_THREAD_GET_NAME() << " writer has ended its work" << std::endl;
         }
     public:
         Logger(const Logger &) = delete;
@@ -321,14 +295,7 @@ namespace _utl { namespace logging {
             for (size_t i = 0; i < formatterMaxNumber; ++i)
             {
                 formatterWorkers_.emplace_back(
-                    formattingBufferSize,
-                    writerInputQueue_,
-                    [this,i](MemoryResource * m) {
-#if defined(DEBUG)
-                        m->debugName = "fmt#" + std::to_string(i);
-#endif
-                        formatterLoop(m);
-                    }
+                    &Logger::formatterLoop, this, formattingBufferSize, std::ref(writerInputQueue_), i
                 );
             }
         }
@@ -336,6 +303,11 @@ namespace _utl { namespace logging {
         {
             std::cerr << DBG_THREAD_GET_NAME() << std::endl;
             isFormattersStopRequested_.store(true);
+            for (auto & th : formatterWorkers_) {
+                if (th.joinable()) {
+                    th.join();
+                }
+            }
         }
         Arg * allocateArgsBuffer(const EventAttributes & attr) {
             auto p = static_cast<Arg *>(argAllocator_.acquire(attr.argumentsExpected));
