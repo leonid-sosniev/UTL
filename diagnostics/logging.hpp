@@ -27,7 +27,37 @@
 
 #include <utl/diagnostics/logging/internal/DebuggingMacros.hpp>
 
+#if defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#endif
+
 namespace {
+
+    void setThreadAffinity(std::thread& thread, size_t *cpuCores, size_t cpuCoresNumber)
+    {
+        static const auto coresMaxNumber = std::thread::hardware_concurrency();
+        auto handle = thread.native_handle();
+        if (handle)
+        {
+#if defined(__linux__)
+            cpu_set_t cpuset;
+            CPU_ZERO(&cpuset);
+            for (auto *end = &cpuCores[cpuCoresNumber]; cpuCores < end; ++cpuCores) {
+                CPU_SET(*cpuCores % coresMaxNumber, &cpuset);
+            }
+            pthread_setaffinity_np(handle, sizeof(cpu_set_t), &cpuset);
+#elif defined(_WIN32)
+            DWORD_PTR affinityMask = 0;
+            for (auto *end = &cpuCores[cpuCoresNumber]; cpuCores < end; ++cpuCores) {
+                affinityMask |= 1 << (*cpuCores % coresMaxNumber);
+            }
+            SetThreadAffinityMask(handle, affinityMask);
+#endif
+        }
+    }
 
     template<typename T> using ArgAllocator = _utl::ThreadSafeCircularAllocator<T>;
     template<typename T> using FormatterAllocator = _utl::ThreadSafeCircularAllocator<T>;
@@ -297,6 +327,7 @@ namespace _utl { namespace logging {
                 formatterWorkers_.emplace_back(
                     &Logger::formatterLoop, this, formattingBufferSize, std::ref(writerInputQueue_), i
                 );
+                setThreadAffinity(formatterWorkers_.back(), &i, 1);
             }
         }
         ~Logger()
