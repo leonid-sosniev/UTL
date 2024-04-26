@@ -96,22 +96,20 @@ namespace _utl { namespace logging {
     };
     std::atomic<uint32_t> EventAttributes::ID_COUNTER{1};
 
-    struct Block {
-        Block * next;
-        const void * data;
-        uint16_t size;
-    };
-    class MemoryResource;
-    struct BlockList {
-        MemoryResource * memoryResource;
-        Block * firstBlock;
-        uint32_t totalAllocatedSize;
-        uint32_t totalAllocationsNumber;
-    };
-
     class MemoryResource {
     private:
         friend class Logger;
+        struct Block {
+            Block * next;
+            const void * data;
+            uint16_t size;
+        };
+        struct BlockList {
+            MemoryResource * memoryResource;
+            Block * firstBlock;
+            uint32_t totalAllocatedSize;
+            uint32_t totalAllocationsNumber;
+        };
         FormatterAllocator<char> & formattedDataAllocator_;
         WriterQueue<BlockList> & writerInputQueue_;
         Block * lastBlock_;
@@ -228,7 +226,7 @@ namespace _utl { namespace logging {
         // inter-worker data channels
         ArgAllocator<Arg> argAllocator_;
         EventQueue<Event> eventQueue_;
-        WriterQueue<BlockList> writerInputQueue_;
+        WriterQueue<MemoryResource::BlockList> writerInputQueue_;
         /// must be set before formatterWorkers_ and writerWorker_
         volatile std::atomic_bool isFormattersStopRequested_;
         // must be destructed before formatterWorkers_
@@ -236,7 +234,7 @@ namespace _utl { namespace logging {
         // must be initialized after fmt_, isFormattersStopRequested_
         std::deque<std::thread> formatterWorkers_;
     private:
-        void formatterLoop(uint32_t formattedDataBufferSize, WriterQueue<BlockList> & writerInputQueue, uint16_t formatterIndex)
+        void formatterLoop(uint32_t formattedDataBufferSize, WriterQueue<MemoryResource::BlockList> & writerInputQueue, uint16_t formatterIndex)
         {
             FormatterAllocator<char> formattedDataAllocator(formattedDataBufferSize);
             MemoryResource mem(writerInputQueue, formattedDataAllocator);
@@ -284,7 +282,7 @@ namespace _utl { namespace logging {
         {
             while (true)
             {
-                BlockList writableBlocks{};
+                MemoryResource::BlockList writableBlocks{};
                 if (writerInputQueue_.tryDequeue(writableBlocks))
                 {
                     auto count = writableBlocks.totalAllocationsNumber;
