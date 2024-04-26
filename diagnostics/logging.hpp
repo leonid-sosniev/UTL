@@ -174,27 +174,6 @@ namespace _utl { namespace logging {
 #endif
     };
 
-    constexpr size_t paddingTo(const size_t value, const size_t alignment) {
-        return (value + (alignment - 1)) / alignment * alignment - value;
-    }
-
-    class WriterWorker
-    {
-        std::thread thread_;
-    public:
-        ~WriterWorker()
-        {
-            if (thread_.joinable())
-            {
-                thread_.join();
-            }
-        }
-        WriterWorker(std::function<void()> threadMainFunction)
-            : thread_(threadMainFunction)
-        {
-        }
-    };
-
 
     class AbstractEventFormatter {
     protected:
@@ -230,7 +209,7 @@ namespace _utl { namespace logging {
         /// must be set before formatterWorkers_ and writerWorker_
         volatile std::atomic_bool isFormattersStopRequested_;
         // must be destructed before formatterWorkers_
-        WriterWorker writerWorker_;
+        std::thread writerWorker_;
         // must be initialized after fmt_, isFormattersStopRequested_
         std::deque<std::thread> formatterWorkers_;
     private:
@@ -336,6 +315,9 @@ namespace _utl { namespace logging {
                 if (th.joinable()) {
                     th.join();
                 }
+            }
+            if (writerWorker_.joinable()) {
+                writerWorker_.join();
             }
         }
         Arg * allocateArgsBuffer(const EventAttributes & attr) {
