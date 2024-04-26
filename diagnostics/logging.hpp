@@ -102,6 +102,7 @@ namespace _utl { namespace logging {
     };
     std::atomic<uint32_t> EventAttributes::ID_COUNTER{1};
 
+    /// @brief A Proxy class to represent Logger resources in AbstractEventFormatter descendants
     class MemoryResource {
     private:
         friend class Logger;
