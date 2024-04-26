@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_FLAGS_DEBUG "-ggdb3 -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
+option(USE_CATCH2 "Use the Catch single-header testing library" ON)
 option(USE_BOOST "Enable using boost.asio instead of internal multithreading mechanism" OFF)
 
 add_executable(Test diagnostics/tests/main.cpp)
