@@ -34,6 +34,12 @@
 #include <windows.h>
 #endif
 
+#if defined(DEBUG)
+#define DEBUG_CODE(x) x
+#else
+#define DEBUG_CODE(...)
+#endif
+
 namespace {
 
     void setThreadAffinity(std::thread& thread, size_t *cpuCores, size_t cpuCoresNumber)
@@ -108,7 +114,9 @@ namespace _utl { namespace logging {
             MemoryResource * memoryResource;
             Block * firstBlock;
             uint32_t totalAllocatedSize;
+DEBUG_CODE(
             uint32_t totalAllocationsNumber;
+)
         };
         FormatterAllocator<char> & formattedDataAllocator_;
         WriterQueue<BlockList> & writerInputQueue_;
@@ -124,7 +132,10 @@ namespace _utl { namespace logging {
             }
             writerInputQueue_.enqueue(std::move(pendingBlockList_));
             pendingBlockList_.firstBlock = nullptr;
-            pendingBlockList_.totalAllocatedSize = pendingBlockList_.totalAllocationsNumber = 0;
+            pendingBlockList_.totalAllocatedSize = 0;
+DEBUG_CODE(
+            pendingBlockList_.totalAllocationsNumber = 0;
+)
         }
         /// @brief This is to be invoked by writer. Deallocates all data of the last event, nullifies pointers to it.
         void friend_cleanupWrittenEventData(uint32_t totalAllocatedSize)
@@ -136,7 +147,7 @@ namespace _utl { namespace logging {
             : formattedDataAllocator_(formattedDataAllocator)
             , writerInputQueue_(writerDataQueue)
             , lastBlock_(nullptr)
-            , pendingBlockList_{this, nullptr, 0, 0}
+            , pendingBlockList_{this, nullptr, 0}
             , mustSubmit_(false)
         {
             assert(pendingBlockList_.memoryResource == this);
@@ -147,7 +158,9 @@ namespace _utl { namespace logging {
             auto dataBuff = formattedDataAllocator_.acquire(initialSize);
             assert(dataBuff);
             assert(pendingBlockList_.memoryResource == this);
+DEBUG_CODE(
             pendingBlockList_.totalAllocationsNumber += 1;
+)
             pendingBlockList_.totalAllocatedSize += initialSize;
             return static_cast<char*>(dataBuff);
         }
@@ -264,12 +277,12 @@ namespace _utl { namespace logging {
                 MemoryResource::BlockList writableBlocks{};
                 if (writerInputQueue_.tryDequeue(writableBlocks))
                 {
-                    auto count = writableBlocks.totalAllocationsNumber;
+                    DEBUG_CODE(auto count = writableBlocks.totalAllocationsNumber;)
                     for (auto *blk = writableBlocks.firstBlock; blk; blk = blk->next)
                     {
-                        assert(count);
+                        DEBUG_CODE(assert(count);)
                         wtr_->write(blk->data, blk->size);
-                        count -= 1;
+                        DEBUG_CODE(count -= 1;)
                     }
                     writableBlocks.memoryResource->friend_cleanupWrittenEventData(writableBlocks.totalAllocatedSize);
                 }
@@ -399,3 +412,4 @@ namespace {
 } // logging
 } // _utl
 
+#undef DEBUG_CODE
